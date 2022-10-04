@@ -1,0 +1,11 @@
+stages:
+
+  annotation:
+    cmd: python src/create_annotation.py params.yaml
+    deps:
+    - src/create_annotation.py
+    - ${annotation.folder_images}
+    params:
+    - annotation
+    outs:
+    - ${annotation.filename_annotation}

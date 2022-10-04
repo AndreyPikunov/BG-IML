@@ -1,0 +1,21 @@
+schema: '2.0'
+stages:
+  annotation:
+    cmd: python src/create_annotation.py params.yaml
+    deps:
+    - path: data/raw/images
+      md5: 33cd2f558339e3d458fc23f654e28162.dir
+      size: 61038353
+      nfiles: 1422
+    - path: src/create_annotation.py
+      md5: d229efc37bc31c1396814aec02f951b5
+      size: 2014
+    params:
+      params.yaml:
+        annotation:
+          folder_images: data/raw/images
+          filename_annotation: data/raw/annotation.csv
+    outs:
+    - path: data/raw/annotation.csv
+      md5: 892d502a192f6cc14193ef114a6bff5b
+      size: 140140
