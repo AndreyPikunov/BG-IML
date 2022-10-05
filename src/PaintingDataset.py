@@ -1,4 +1,5 @@
 from pathlib import Path
+from re import T
 
 import pandas as pd
 
@@ -17,21 +18,29 @@ class PaintingDataset(Dataset):
         self,
         annotation: pd.DataFrame,
         folder_images: str,
-        transform=None,
+        transform_train=None,
+        transform_preprocess=None,
     ):
         self.ann = annotation.copy()
         self.folder_images = Path(folder_images)
+        self.transform_train = transform_train
+
         self.images = []
         self.Y = []
-        self.transform = transform
+        self.labels = []
 
         for _, row in tqdm(self.ann.iterrows(), total=len(self.ann)):
             label = row["label"]
             label_code = row["label_code"]
             filename_image = self.folder_images / label / row.filename
             image = read_image(str(filename_image))
+
+            if transform_preprocess:
+                image = transform_preprocess(image)
+
             self.images.append(image)
             self.Y.append(label_code)
+            self.labels.append(label)
 
         self.Y = one_hot(torch.tensor(self.Y))
         self.N = len(self.Y)
@@ -41,6 +50,7 @@ class PaintingDataset(Dataset):
 
     def __getitem__(self, idx):
         x = self.images[idx]
-        x_transformed = self.transform(x) if self.transform else x
+        t = self.transform_train
+        x_transformed = t(x) if t else x
         y = self.Y[idx]
         return x_transformed, y
