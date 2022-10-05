@@ -1,0 +1,7 @@
+shared:
+  seed: 202208
+
+
+annotation:
+  folder_images: "data/raw/images"
+  filename_annotation: "data/raw/annotation.csv"
