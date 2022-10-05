@@ -13,3 +13,7 @@ def get_abs_dirname(filename):
     result = Path(filename).parent.resolve()
     result = str(result)
     return result
+
+
+def rescale(x, vmin=0, vmax=1):
+    return (x - x.min()) / (x.max() - x.min()) * (vmax - vmin) + vmin
