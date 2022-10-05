@@ -51,6 +51,7 @@ def main(config):
             rows_annotation.append(row)
 
     annotation = pd.DataFrame(rows_annotation)
+    annotation["label_code"] = annotation.label.astype("category").cat.codes
 
     filename_save = config["annotation"]["filename_annotation"]
     annotation.to_csv(filename_save, index=False)
