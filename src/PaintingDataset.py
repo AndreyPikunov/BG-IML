@@ -1,5 +1,4 @@
 from pathlib import Path
-from re import T
 
 import pandas as pd
 
@@ -42,7 +41,7 @@ class PaintingDataset(Dataset):
             self.Y.append(label_code)
             self.labels.append(label)
 
-        self.Y = one_hot(torch.tensor(self.Y))
+        self.Y = one_hot(torch.tensor(self.Y)).float()
         self.N = len(self.Y)
 
     def __len__(self):
