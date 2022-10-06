@@ -33,6 +33,15 @@ def create_model(n_classes):
     resnet_fc = resnet.fc
     resnet_fc.requires_grad = True
 
+    logging.info("reset resnet fc")
+    for name, layer in resnet_fc.named_modules():
+        # https://discuss.pytorch.org/t/how-to-reset-parameters-of-layer/120782/2
+
+        logging.info(name)
+        if hasattr(layer, "reset_parameters"):
+            logging.info(f"Reset trainable parameters of layer = {layer}")
+            layer.reset_parameters()
+
     head = nn.Linear(resnet_fc.out_features, n_classes)
 
     model = nn.Sequential(resnet, head)
@@ -73,12 +82,15 @@ def main(config):
     )
 
     column_fold = config["cv_resnet18"]["column_fold"]
-    fold_indices = ann[column_fold].unique()
+
+    folds_use = config["cv_resnet18"].get("folds_use")
+    if folds_use is None:
+        folds_use = ann[column_fold].unique()
 
     batch_size = config["cv_resnet18"]["batch_size"]
     folder_images = config["cv_resnet18"]["folder_images"]
 
-    for fold_index in fold_indices:
+    for fold_index in folds_use:
 
         if fold_index == "val":
             continue
@@ -93,18 +105,18 @@ def main(config):
         mask_val = ann.fold_author == "val"
         mask_train = ~(mask_test | mask_val)
 
-        dataset_test = PaintingDataset(
-            ann[mask_test], folder_images, transform_preprocess=transform_resnet
-        )
-
         dataset_train = PaintingDataset(
             ann[mask_train], folder_images, transform_train=transform_train
         )
 
-        dataloader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=True)
-        dataloader_train = DataLoader(
-            dataset_train, batch_size=batch_size, shuffle=False
+        dataset_test = PaintingDataset(
+            ann[mask_test], folder_images, transform_preprocess=transform_resnet
         )
+
+        dataloader_train = DataLoader(
+            dataset_train, batch_size=batch_size, shuffle=True
+        )
+        dataloader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=False)
 
         model, parameters = create_model(n_classes)
         model = model.to(device)
@@ -126,10 +138,7 @@ def main(config):
         else:
             raise NotImplementedError()
 
-        mlflow.log_params({
-            "optimizer": optimizer_name,
-            "lr": lr
-        })
+        mlflow.log_params({"optimizer": optimizer_name, "lr": lr})
 
         scorer = Scorer(code2label=code2label)
 
@@ -145,8 +154,6 @@ def main(config):
         )
 
         mlflow.end_run()
-
-    pass
 
 
 if __name__ == "__main__":

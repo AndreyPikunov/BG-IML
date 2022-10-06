@@ -17,17 +17,20 @@ design:
 
 cv_resnet18:
   filename_design: data/design.csv
-  column_fold: fold_author
   folder_images: data/raw/images
 
   folder_output_model: models/cv_resnet18
   folder_output_report: reports/cv_resnet18
 
-  n_epochs: 20
-  batch_size: 128
+  column_fold: fold_author
+  folds_use: [0]
+
+  n_epochs: 100
+  batch_size: 64
   optimizer:
     name: Adam
-    lr: 0.01 
-  label_smoothing: 0.1
+    lr: 0.001 
+    
+  label_smoothing: 0.0
 
   save_model_checkpoints: false

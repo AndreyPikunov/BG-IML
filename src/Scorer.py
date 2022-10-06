@@ -15,7 +15,7 @@ class Scorer:
     def __call__(self, y_pred, y_true):
         y_true = self._prepare_y(y_true)
         y_pred = self._prepare_y(y_pred)
-        score = f1_score(y_true, y_pred, average="micro")
+        score = f1_score(y_true, y_pred, average="weighted")
         return score
 
     def report(self, y_pred, y_true):
