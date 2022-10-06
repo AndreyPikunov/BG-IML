@@ -19,3 +19,23 @@ stages:
     - path: data/raw/annotation.csv
       md5: 15591559d9690cb96a3be9e1a96ed497
       size: 142995
+  design:
+    cmd: python src/create_design.py params.yaml
+    deps:
+    - path: data/raw/annotation.csv
+      md5: 15591559d9690cb96a3be9e1a96ed497
+      size: 142995
+    - path: src/create_design.py
+      md5: 593a923d2372ad79f9a49dccc43ee01c
+      size: 3771
+    params:
+      params.yaml:
+        design:
+          filename_annotation: data/raw/annotation.csv
+          filename_save: data/design.csv
+          kfold_splits: 4
+          val_size: 0.05
+    outs:
+    - path: data/design.csv
+      md5: 5e5c0e67047d828076c9431daa503220
+      size: 145946

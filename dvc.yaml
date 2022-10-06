@@ -9,3 +9,13 @@ stages:
     - annotation
     outs:
     - ${annotation.filename_annotation}
+
+  design:
+    cmd: python src/create_design.py params.yaml
+    deps:
+    - src/create_design.py
+    - ${design.filename_annotation}
+    params:
+    - design
+    outs:
+    - ${design.filename_save}

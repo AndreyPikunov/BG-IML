@@ -5,3 +5,10 @@ shared:
 annotation:
   folder_images: "data/raw/images"
   filename_annotation: "data/raw/annotation.csv"
+
+
+design:
+  filename_annotation: "data/raw/annotation.csv"
+  filename_save: "data/design.csv"
+  kfold_splits: 4
+  val_size: 0.05
