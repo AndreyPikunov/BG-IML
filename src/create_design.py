@@ -94,6 +94,7 @@ def main(config):
                     best_split = ann.loc[mask_label, "fold_author"].copy()
 
             ann.loc[mask_label, "fold_author"] = best_split
+            assert ~ann.loc[mask_label, "fold_author"].isna().any()
 
     filename_save = config["design"]["filename_save"]
     ann.to_csv(filename_save, index=False)
@@ -114,5 +115,7 @@ if __name__ == "__main__":
 
     project_root = get_abs_dirname(filename_config)
     config["shared"]["project_root"] = project_root
+
+    np.random.seed(config["shared"]["seed"])
 
     main(config)

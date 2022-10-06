@@ -26,8 +26,8 @@ stages:
       md5: 15591559d9690cb96a3be9e1a96ed497
       size: 142995
     - path: src/create_design.py
-      md5: 593a923d2372ad79f9a49dccc43ee01c
-      size: 3771
+      md5: 2f9cd3e4f101828afcd3f512fc7a72f4
+      size: 3885
     params:
       params.yaml:
         design:
@@ -37,5 +37,5 @@ stages:
           val_size: 0.05
     outs:
     - path: data/design.csv
-      md5: 5e5c0e67047d828076c9431daa503220
-      size: 145946
+      md5: 34c154466efbd04b5c9242a0d412339e
+      size: 145983

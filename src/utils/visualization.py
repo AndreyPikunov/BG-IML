@@ -79,4 +79,7 @@ def plot_confusion_matrix(
     ax.set_xlabel("Predicted")
     ax.set_ylabel("True")
 
+    if ax is None:
+        plt.tight_layout()
+
     return fig, ax
