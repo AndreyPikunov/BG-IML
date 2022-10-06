@@ -17,7 +17,7 @@ def plot_confusion_matrix(
     assert m.shape[0] == m.shape[1]
 
     if ax is None:
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=(5, 5))
     else:
         fig = ax.figure
 

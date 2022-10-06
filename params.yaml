@@ -15,18 +15,21 @@ design:
   val_size: 0.05
 
 
-cv_resnet18:
+cv_resnet:
   filename_design: data/design.csv
   folder_images: data/raw/images
 
-  folder_output_model: models/cv_resnet18
-  folder_output_report: reports/cv_resnet18
+  folder_output_model: models/cv_resnet/best
+  folder_output_report: reports/cv_resnet/best
 
   column_fold: fold_author
   folds_use: [0]
 
+  model_name: resnet101
+  reset_fc: false
+
   n_epochs: 100
-  batch_size: 64
+  batch_size: 32
   optimizer:
     name: Adam
     lr: 0.001 

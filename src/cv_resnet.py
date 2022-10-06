@@ -8,7 +8,6 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 from torch import nn
-from torchvision.models import resnet18, ResNet18_Weights
 from torchvision import transforms
 
 import mlflow
@@ -23,9 +22,37 @@ from utils import load_config, get_abs_dirname
 from utils.training import train
 
 
-def create_model(n_classes):
+def load_resnet(model_name):
 
-    resnet = resnet18(weights=ResNet18_Weights.DEFAULT)
+    if model_name == "resnet18":
+        from torchvision.models import (
+            resnet18 as resnet,
+            ResNet18_Weights as resnet_weights,
+        )
+    elif model_name == "resnet34":
+        from torchvision.models import (
+            resnet34 as resnet,
+            ResNet34_Weights as resnet_weights,
+        )
+    elif model_name == "resnet50":
+        from torchvision.models import (
+            resnet50 as resnet,
+            ResNet50_Weights as resnet_weights,
+        )
+    elif model_name == "resnet101":
+        from torchvision.models import (
+            resnet101 as resnet,
+            ResNet101_Weights as resnet_weights,
+        )
+
+    return resnet, resnet_weights
+
+
+def create_model(n_classes, model_name, reset_fc=True):
+
+    resnet_base, resnet_weights = load_resnet(model_name)
+
+    resnet = resnet_base(weights=resnet_weights.DEFAULT)
     resnet.eval()
     for param in resnet.parameters():
         param.requires_grad = False
@@ -33,20 +60,25 @@ def create_model(n_classes):
     resnet_fc = resnet.fc
     resnet_fc.requires_grad = True
 
-    logging.info("reset resnet fc")
-    for name, layer in resnet_fc.named_modules():
-        # https://discuss.pytorch.org/t/how-to-reset-parameters-of-layer/120782/2
+    if reset_fc:
+        logging.info("reset resnet fc")
+        for name, layer in resnet_fc.named_modules():
+            # https://discuss.pytorch.org/t/how-to-reset-parameters-of-layer/120782/2
 
-        logging.info(name)
-        if hasattr(layer, "reset_parameters"):
-            logging.info(f"Reset trainable parameters of layer = {layer}")
-            layer.reset_parameters()
+            logging.info(name)
+            if hasattr(layer, "reset_parameters"):
+                logging.info(f"Reset trainable parameters of layer = {layer}")
+                layer.reset_parameters()
 
     head = nn.Linear(resnet_fc.out_features, n_classes)
-
     model = nn.Sequential(resnet, head)
 
-    parameters = chain(resnet_fc.parameters(), head.parameters())
+    if reset_fc:
+        parameters = chain(resnet_fc.parameters(), head.parameters())
+    else:
+        parameters = head.parameters()
+
+    logging.info(f"new {model_name} model was created")
 
     return model, parameters
 
@@ -57,7 +89,7 @@ def main(config):
     device = torch.device("mps" if mps_is_ok else "cpu")
     logging.info(f"device: {device}")
 
-    filename_design = config["cv_resnet18"]["filename_design"]
+    filename_design = config["cv_resnet"]["filename_design"]
     ann = pd.read_csv(filename_design)
 
     code2label = (
@@ -68,7 +100,10 @@ def main(config):
     n_classes = len(ann.label.unique())
     logging.info(f"n_classes: {n_classes}")
 
-    transform_resnet = ResNet18_Weights.DEFAULT.transforms()
+    model_name = config["cv_resnet"]["model_name"]
+    _, resnet_weights = load_resnet(model_name)
+
+    transform_resnet = resnet_weights.DEFAULT.transforms()
     transform_train = transforms.Compose(
         [
             transforms.RandomRotation(45),
@@ -81,14 +116,14 @@ def main(config):
         ]
     )
 
-    column_fold = config["cv_resnet18"]["column_fold"]
+    column_fold = config["cv_resnet"]["column_fold"]
 
-    folds_use = config["cv_resnet18"].get("folds_use")
+    folds_use = config["cv_resnet"].get("folds_use")
     if folds_use is None:
         folds_use = ann[column_fold].unique()
 
-    batch_size = config["cv_resnet18"]["batch_size"]
-    folder_images = config["cv_resnet18"]["folder_images"]
+    batch_size = config["cv_resnet"]["batch_size"]
+    folder_images = config["cv_resnet"]["folder_images"]
 
     for fold_index in folds_use:
 
@@ -96,6 +131,8 @@ def main(config):
             continue
 
         mlflow.start_run()
+
+        mlflow.log_dict(config, "config-runtime.yaml")
 
         mlflow.log_param("fold_index", fold_index)
 
@@ -118,8 +155,12 @@ def main(config):
         )
         dataloader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=False)
 
-        model, parameters = create_model(n_classes)
+
+        reset_fc = config["cv_resnet"]["reset_fc"]
+        model, parameters = create_model(n_classes, model_name, reset_fc)
         model = model.to(device)
+
+        mlflow.log_param("model_name", model_name)
 
         label_weight = 1 / dataset_train.ann.label_code.value_counts().sort_index()
         mlflow.log_dict(label_weight.to_dict(), "label_weight.yml")
@@ -130,8 +171,8 @@ def main(config):
             weight=torch.tensor(label_weight).float().to(device),
         )
 
-        lr = config["cv_resnet18"]["optimizer"]["lr"]
-        optimizer_name = config["cv_resnet18"]["optimizer"]["name"]
+        lr = config["cv_resnet"]["optimizer"]["lr"]
+        optimizer_name = config["cv_resnet"]["optimizer"]["name"]
 
         if optimizer_name == "Adam":
             optimizer = torch.optim.Adam(parameters, lr=lr)
@@ -149,7 +190,7 @@ def main(config):
             scorer=scorer,
             train_dataloader=dataloader_train,
             test_dataloader=dataloader_test,
-            params=config["cv_resnet18"],
+            params=config["cv_resnet"],
             device=device,
         )
 
@@ -161,7 +202,7 @@ if __name__ == "__main__":
     parser.add_argument("config", type=str)
     parser.add_argument("--logging-level", type=str, default="WARNING")
     parser.add_argument(
-        "--mlflow-experiment", type=str, default="cv_resnet18"
+        "--mlflow-experiment", type=str, default="cv_resnet"
     )  # useful for debugging
     args = parser.parse_args()
 
