@@ -1,7 +1,33 @@
 shared:
   seed: 202208
+  mlflow_tracking_uri: http://localhost:5009
 
 
 annotation:
-  folder_images: "data/raw/images"
-  filename_annotation: "data/raw/annotation.csv"
+  folder_images: data/raw/images
+  filename_annotation: data/raw/annotation.csv
+
+
+design:
+  filename_annotation: data/raw/annotation.csv
+  filename_save: "data/design.csv"
+  kfold_splits: 4
+  val_size: 0.05
+
+
+cv_resnet18:
+  filename_design: data/design.csv
+  column_fold: fold_author
+  folder_images: data/raw/images
+
+  folder_output_model: models/cv_resnet18
+  folder_output_report: reports/cv_resnet18
+
+  n_epochs: 20
+  batch_size: 128
+  optimizer:
+    name: Adam
+    lr: 0.01 
+  label_smoothing: 0.1
+
+  save_model_checkpoints: false
