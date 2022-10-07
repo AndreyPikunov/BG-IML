@@ -1,3 +1,4 @@
+import os
 import logging
 import argparse
 from itertools import chain
@@ -48,36 +49,35 @@ def load_resnet(model_name):
     return resnet, resnet_weights
 
 
-def create_model(n_classes, model_name, reset_fc=True):
+def create_model(
+    n_classes, model_name, retrain_type="none"
+):
 
     resnet_base, resnet_weights = load_resnet(model_name)
 
     resnet = resnet_base(weights=resnet_weights.DEFAULT)
-    resnet.eval()
-    for param in resnet.parameters():
-        param.requires_grad = False
-
     resnet_fc = resnet.fc
-    resnet_fc.requires_grad = True
 
-    if reset_fc:
-        logging.info("reset resnet fc")
-        for name, layer in resnet_fc.named_modules():
-            # https://discuss.pytorch.org/t/how-to-reset-parameters-of-layer/120782/2
+    if retrain_type == "none":
+        for param in resnet.parameters():
+            param.requires_grad = False
 
-            logging.info(name)
-            if hasattr(layer, "reset_parameters"):
-                logging.info(f"Reset trainable parameters of layer = {layer}")
-                layer.reset_parameters()
+    if retrain_type == "fc":
+        for param in resnet.parameters():
+            param.requires_grad = False
+        resnet_fc.requires_grad = True
 
     head = nn.Linear(resnet_fc.out_features, n_classes)
     model = nn.Sequential(resnet, head)
 
-    if reset_fc:
+    if retrain_type == "full":
+        parameters = model.parameters()
+    elif retrain_type == "fc":
         parameters = chain(resnet_fc.parameters(), head.parameters())
     else:
         parameters = head.parameters()
 
+    model.eval()
     logging.info(f"new {model_name} model was created")
 
     return model, parameters
@@ -89,7 +89,9 @@ def main(config):
     device = torch.device("mps" if mps_is_ok else "cpu")
     logging.info(f"device: {device}")
 
-    filename_design = config["cv_resnet"]["filename_design"]
+    filename_design = os.path.join(
+        config["shared"]["project_root"], config["cv_resnet"]["filename_design"]
+    )
     ann = pd.read_csv(filename_design)
 
     code2label = (
@@ -123,7 +125,16 @@ def main(config):
         folds_use = ann[column_fold].unique()
 
     batch_size = config["cv_resnet"]["batch_size"]
-    folder_images = config["cv_resnet"]["folder_images"]
+    folder_images = os.path.join(
+        config["shared"]["project_root"], config["cv_resnet"]["folder_images"]
+    )
+
+    keys = "folder_output_model", "folder_output_report"
+    for key in keys:
+        value = os.path.join(config["shared"]["project_root"], config["cv_resnet"][key])
+        config["cv_resnet"][key] = value
+
+    score_best_folds = []
 
     for fold_index in folds_use:
 
@@ -155,12 +166,14 @@ def main(config):
         )
         dataloader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=False)
 
-
-        reset_fc = config["cv_resnet"]["reset_fc"]
-        model, parameters = create_model(n_classes, model_name, reset_fc)
+        retrain_type = config["cv_resnet"]["retrain_type"]
+        model, parameters = create_model(n_classes, model_name, retrain_type=retrain_type)
         model = model.to(device)
 
-        mlflow.log_param("model_name", model_name)
+        mlflow.log_params({
+            "model_name": model_name,
+            "retrain_type": retrain_type
+        })
 
         label_weight = 1 / dataset_train.ann.label_code.value_counts().sort_index()
         mlflow.log_dict(label_weight.to_dict(), "label_weight.yml")
@@ -183,7 +196,7 @@ def main(config):
 
         scorer = Scorer(code2label=code2label)
 
-        train(
+        score_best = train(
             model=model,
             optimizer=optimizer,
             criterion=criterion,
@@ -194,7 +207,13 @@ def main(config):
             device=device,
         )
 
+        score_best_folds.append(score_best)
+
         mlflow.end_run()
+
+    score_mean = np.mean(score_best_folds)
+
+    return score_mean
 
 
 if __name__ == "__main__":

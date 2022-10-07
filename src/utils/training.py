@@ -181,3 +181,5 @@ def train(
                     mlflow.log_artifact(filename_save_model_pt)
 
             t.set_postfix(train=score_train, test=score_test, best=score_test_best)
+
+    return score_test_best

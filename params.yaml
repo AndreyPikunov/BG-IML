@@ -23,12 +23,12 @@ cv_resnet:
   folder_output_report: reports/cv_resnet/best
 
   column_fold: fold_author
-  folds_use: [0]
+  folds_use: [0, 1, 2, 3]
 
-  model_name: resnet101
-  reset_fc: false
+  model_name: resnet18
+  retrain_type: fc  # options: full, fc, none
 
-  n_epochs: 100
+  n_epochs: 50
   batch_size: 32
   optimizer:
     name: Adam
@@ -37,3 +37,16 @@ cv_resnet:
   label_smoothing: 0.0
 
   save_model_checkpoints: false
+
+
+optunize_resnet:
+  base_model_list:
+  - resnet18
+  - resnet34
+  - resnet50
+  retrain_type_list:
+  - fc
+  - full
+  lr:
+    min: 0.001
+    max: 0.05
