@@ -15,19 +15,38 @@ design:
   val_size: 0.05
 
 
-cv_resnet18:
+cv_resnet:
   filename_design: data/design.csv
-  column_fold: fold_author
   folder_images: data/raw/images
 
-  folder_output_model: models/cv_resnet18
-  folder_output_report: reports/cv_resnet18
+  folder_output_model: models/cv_resnet/best
+  folder_output_report: reports/cv_resnet/best
 
-  n_epochs: 20
-  batch_size: 128
+  column_fold: fold_author
+  folds_use: [0, 1, 2, 3]
+
+  model_name: resnet18
+  retrain_type: fc  # options: full, fc, none
+
+  n_epochs: 50
+  batch_size: 32
   optimizer:
     name: Adam
-    lr: 0.01 
-  label_smoothing: 0.1
+    lr: 0.001 
+    
+  label_smoothing: 0.0
 
   save_model_checkpoints: false
+
+
+optunize_resnet:
+  base_model_list:
+  - resnet18
+  - resnet34
+  - resnet50
+  retrain_type_list:
+  - fc
+  - full
+  lr:
+    min: 0.001
+    max: 0.05

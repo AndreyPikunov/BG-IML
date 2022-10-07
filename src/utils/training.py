@@ -14,7 +14,7 @@ def get_device(device="cpu"):
 
 
 def predict_model(model, dataloader, device="cpu"):
-    
+
     device = get_device(device)
 
     y_true_list = []
@@ -145,20 +145,31 @@ def train(
             mlflow.log_metrics(objectives, step=epoch)
 
             score_test = objectives["score_test"]
+            score_train = objectives["score_train"]
+
             if score_test > score_test_best:
                 score_test_best = score_test
+
+                mlflow.log_metrics(
+                    {
+                        "best_epoch": epoch,
+                        "best_score_test": score_test,
+                        "best_score_train": score_train,
+                    },
+                    step=epoch,
+                )
 
                 y_pred, y_true = predict_model(model, test_dataloader, device)
                 report = scorer.report(y_pred, y_true)
 
                 mlflow.log_text(
                     report["classification_report_text"],
-                    "reports/best/classification_report.txt"
+                    "reports/best/classification_report.txt",
                 )
 
                 mlflow.log_figure(
                     report["confusion_matrix_figure"],
-                    "figures/best/confusion_matrix.png"
+                    "figures/best/confusion_matrix.png",
                 )
 
                 if save_model_checkpoints:
@@ -169,6 +180,6 @@ def train(
                     model_scripted.save(filename_save_model_pt)
                     mlflow.log_artifact(filename_save_model_pt)
 
-            t.set_postfix(
-                train=objectives["score_train"], test=score_test, best=score_test_best
-            )
+            t.set_postfix(train=score_train, test=score_test, best=score_test_best)
+
+    return score_test_best
