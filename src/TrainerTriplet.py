@@ -6,6 +6,9 @@ import pandas as pd
 from tqdm import trange
 import mlflow
 import plotly.express as px
+from umap import UMAP
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
 
 
 class TrainerTriplet:
@@ -81,7 +84,7 @@ class TrainerTriplet:
                 scores = self.scorer(self.embeddings["test"], self.labels["test"])
             else:
                 scores = {}
-                
+
             return loss, scores
 
     def train_model(self):
@@ -164,7 +167,7 @@ class TrainerTriplet:
 
         save_model_checkpoints = params["save_model_checkpoints"]
 
-        loss_test_best = 1e9
+        score_test_best = -1e9
 
         with trange(n_epochs) as t:
             for epoch in t:
@@ -179,24 +182,22 @@ class TrainerTriplet:
 
                 mlflow.log_metrics(objectives, step=epoch)
 
-                loss_test = objectives["loss_test"]
-                loss_train = objectives["loss_train"]
+                # TODO: move to params.yaml
+                metric_name = "silhouette_score"
+                metric_test = metric_name + "_test"
+                metric_train = metric_name + "_train"
+
+                score_test = objectives[metric_test]
+                score_train = objectives[metric_train]
 
                 fig = self.plot_embeddings()
                 filename = f"figures/embeddings-latest.html"
                 mlflow.log_figure(fig, filename)
 
-                if loss_test < loss_test_best:
-                    loss_test_best = loss_test
+                is_best = score_test > score_test_best
 
-                    mlflow.log_metrics(
-                        {
-                            "best_epoch": epoch,
-                            "best_loss_test": loss_test,
-                            "best_loss_train": loss_train,
-                        },
-                        step=epoch,
-                    )
+                if is_best:
+                    score_test_best = score_test
 
                     if save_model_checkpoints:
                         self.dump_model()
@@ -205,9 +206,9 @@ class TrainerTriplet:
                     filename = f"figures/embeddings-{epoch:03d}.html"
                     mlflow.log_figure(fig, filename)
 
-                t.set_postfix(train=loss_train, test=loss_test, best=loss_test_best)
+                t.set_postfix(train=score_train, test=score_test, best=score_test_best)
 
-        return loss_test_best
+        return score_test_best
 
     def dump_model(self):
 
@@ -255,11 +256,27 @@ class TrainerTriplet:
 
         df = self.collect_embeddings()
 
-        args = dict(x=0, y=1, color="label", symbol="fold", width=800, height=600)
+        args = dict(color=df["label"], symbol=df["fold"], width=800, height=600)
 
-        if 2 in df:
-            fig = px.scatter_3d(df, z=2, **args)
+        if 3 in df:
+            reducer = UMAP(n_components=3)
+            pipeline_umap = make_pipeline(StandardScaler(), reducer)
+            X = df.drop(columns=["label", "fold"]).values
+            Z = pipeline_umap.fit_transform(X)
+            args["x"] = Z[:, 0]
+            args["y"] = Z[:, 1]
+            args["z"] = Z[:, 2]
+            fig = px.scatter_3d(**args)
+
+        elif 2 in df:
+            args["x"] = df[0]
+            args["y"] = df[1]
+            args["z"] = df[2]
+            fig = px.scatter_3d(**args)
+
         else:
-            fig = px.scatter(df, **args)
+            args["x"] = df[0]
+            args["y"] = df[1]
+            fig = px.scatter(**args)
 
         return fig

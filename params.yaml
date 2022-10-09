@@ -65,7 +65,7 @@ metric_learning_resnet:
 
   model_name: resnet18
   retrain_type: full  # options: full, fc, none
-  embedding_size: 3  # well... 2^3 = 8
+  embedding_size: 8  # well... 2^3 = 8
 
   n_epochs: 50
   batch_size: 128
@@ -76,4 +76,14 @@ metric_learning_resnet:
     gamma: 0.9
     
   save_model_checkpoints: true
+  mlflow_experiment: metric_learning_resnet
+
+
+embedding_size_search:
+  model_name: resnet18
+  retrain_type: full
+  embedding_size_list:
+  - 8
+  - 16
+  - 64
   mlflow_experiment: metric_learning_resnet
