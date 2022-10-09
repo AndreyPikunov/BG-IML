@@ -70,9 +70,6 @@ if __name__ == "__main__":
     mlflow.set_tracking_uri(mlflow_tracking_uri)
 
     mlflow_experiment = args.mlflow_experiment
-    if exp := config["optunize_resnet"]["mlflow_experiment"]:
-        mlflow_experiment = exp
-
     mlflow.set_experiment(mlflow_experiment)
 
     main(config)

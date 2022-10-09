@@ -23,30 +23,67 @@ cv_resnet:
   folder_output_report: reports/cv_resnet/best
 
   column_fold: fold_author
-  folds_use: [0, 1, 2, 3]
+  folds_use: [3]
 
   model_name: resnet18
-  retrain_type: fc  # options: full, fc, none
+  retrain_type: full  # options: full, fc, none
 
   n_epochs: 50
   batch_size: 32
   optimizer:
     name: Adam
-    lr: 0.001 
+    lr: 0.00001 
     
   label_smoothing: 0.0
 
-  save_model_checkpoints: false
+  save_model_checkpoints: true
 
 
 optunize_resnet:
+  n_trials: 10
   base_model_list:
   - resnet18
-  - resnet34
-  - resnet50
+  # - resnet34
+  # - resnet50
   retrain_type_list:
-  - fc
+  # - fc
   - full
   lr:
-    min: 0.001
-    max: 0.05
+    min: 0.00001
+    max: 0.001
+
+
+metric_learning_resnet:
+  filename_design: data/design.csv
+  folder_images: data/raw/images
+
+  folder_output_model: models/metric_learning_resnet/best
+  folder_output_report: reports/metric_learning_resnet/best
+
+  column_fold: fold_author
+  folds_use: [3]
+
+  model_name: resnet18
+  retrain_type: full  # options: full, fc, none
+  embedding_size: 8  # well... 2^3 = 8
+
+  n_epochs: 50
+  batch_size: 128
+  optimizer:
+    name: Adam
+    lr: 0.0001
+  scheduler:
+    gamma: 0.9
+    
+  save_model_checkpoints: true
+  mlflow_experiment: metric_learning_resnet
+
+
+embedding_size_search:
+  model_name: resnet18
+  retrain_type: full
+  embedding_size_list:
+  - 8
+  - 16
+  - 64
+  mlflow_experiment: metric_learning_resnet

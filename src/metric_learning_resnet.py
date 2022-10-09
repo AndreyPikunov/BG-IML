@@ -17,9 +17,9 @@ import sys
 
 sys.path.append("../src")
 
-from PaintingDataset import PaintingDataset
-from Scorer import Scorer
-from Trainer import Trainer
+from PaintingDataset import PaintingDatasetTriplet as PaintingDataset
+from TrainerTriplet import TrainerTriplet as Trainer
+from ScorerClustering import ScorerClustering as Scorer
 from utils import load_config, get_abs_dirname
 
 
@@ -49,9 +49,7 @@ def load_resnet(model_name):
     return resnet, resnet_weights
 
 
-def create_model(
-    n_classes, model_name, retrain_type="none"
-):
+def create_model(embedding_size, model_name, retrain_type="none"):
 
     resnet_base, resnet_weights = load_resnet(model_name)
 
@@ -67,7 +65,7 @@ def create_model(
             param.requires_grad = False
         resnet_fc.requires_grad = True
 
-    head = nn.Linear(resnet_fc.out_features, n_classes)
+    head = nn.Linear(resnet_fc.out_features, embedding_size)
     model = nn.Sequential(resnet, head)
 
     if retrain_type == "full":
@@ -90,14 +88,12 @@ def main(config):
     logging.info(f"device: {device}")
 
     filename_design = os.path.join(
-        config["shared"]["project_root"], config["cv_resnet"]["filename_design"]
+        config["shared"]["project_root"],
+        config["metric_learning_resnet"]["filename_design"],
     )
     ann = pd.read_csv(filename_design)
 
-    n_classes = len(ann.label.unique())
-    logging.info(f"n_classes: {n_classes}")
-
-    model_name = config["cv_resnet"]["model_name"]
+    model_name = config["metric_learning_resnet"]["model_name"]
     _, resnet_weights = load_resnet(model_name)
 
     transform_resnet = resnet_weights.DEFAULT.transforms()
@@ -113,21 +109,24 @@ def main(config):
         ]
     )
 
-    column_fold = config["cv_resnet"]["column_fold"]
+    column_fold = config["metric_learning_resnet"]["column_fold"]
 
-    folds_use = config["cv_resnet"].get("folds_use")
+    folds_use = config["metric_learning_resnet"].get("folds_use")
     if folds_use is None:
         folds_use = ann[column_fold].unique()
 
-    batch_size = config["cv_resnet"]["batch_size"]
+    batch_size = config["metric_learning_resnet"]["batch_size"]
     folder_images = os.path.join(
-        config["shared"]["project_root"], config["cv_resnet"]["folder_images"]
+        config["shared"]["project_root"],
+        config["metric_learning_resnet"]["folder_images"],
     )
 
     keys = "folder_output_model", "folder_output_report"
     for key in keys:
-        value = os.path.join(config["shared"]["project_root"], config["cv_resnet"][key])
-        config["cv_resnet"][key] = value
+        value = os.path.join(
+            config["shared"]["project_root"], config["metric_learning_resnet"][key]
+        )
+        config["metric_learning_resnet"][key] = value
 
     score_best_folds = []
 
@@ -161,51 +160,67 @@ def main(config):
         )
         dataloader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=False)
 
-        retrain_type = config["cv_resnet"]["retrain_type"]
-        model, parameters = create_model(n_classes, model_name, retrain_type=retrain_type)
+        retrain_type = config["metric_learning_resnet"]["retrain_type"]
+        embedding_size = config["metric_learning_resnet"]["embedding_size"]
+        model, parameters = create_model(
+            embedding_size, model_name, retrain_type=retrain_type
+        )
         model = model.to(device)
 
-        mlflow.log_params({
-            "model_name": model_name,
-            "retrain_type": retrain_type
-        })
+        mlflow.log_params(
+            {
+                "model_name": model_name,
+                "retrain_type": retrain_type,
+                "embedding_size": embedding_size,
+            }
+        )
 
         label_weight = 1 / dataset_train.ann.label_code.value_counts().sort_index()
         mlflow.log_dict(label_weight.to_dict(), "label_weight.yml")
 
-        label_smoothing = 0.1
-        criterion = nn.CrossEntropyLoss(
-            label_smoothing=label_smoothing,
-            weight=torch.tensor(label_weight).float().to(device),
-        )
+        criterion = nn.TripletMarginLoss()
 
-        lr = config["cv_resnet"]["optimizer"]["lr"]
-        optimizer_name = config["cv_resnet"]["optimizer"]["name"]
+        lr = config["metric_learning_resnet"]["optimizer"]["lr"]
+        optimizer_name = config["metric_learning_resnet"]["optimizer"]["name"]
 
         if optimizer_name == "Adam":
             optimizer = torch.optim.Adam(parameters, lr=lr)
         else:
             raise NotImplementedError()
 
-        mlflow.log_params({"optimizer": optimizer_name, "lr": lr})
+        gamma = config["metric_learning_resnet"]["scheduler"]["gamma"]
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=gamma)
+
+        mlflow.log_params(
+            {
+                "optimizer": optimizer_name,
+                "lr": lr,
+                "scheduler": "ExponentialLR",
+                "gamma": gamma,
+            }
+        )
 
         ann_fold = dataset_train.ann
         code2label = (
-            ann_fold[["label", "label_code"]].drop_duplicates().set_index("label_code")["label"]
+            ann_fold[["label", "label_code"]]
+            .drop_duplicates()
+            .set_index("label_code")["label"]
         )
         code2label.sort_index(inplace=True)
 
-        scorer = Scorer(code2label=code2label)
+        scorer = Scorer()
 
         trainer = Trainer(
             model=model,
             optimizer=optimizer,
             criterion=criterion,
-            scorer=scorer,
             dataloader_train=dataloader_train,
             dataloader_test=dataloader_test,
-            params=config["cv_resnet"],
+            params=config["metric_learning_resnet"],
             device=device,
+            code2label=code2label,
+            scheduler=scheduler,
+            scorer=scorer
         )
 
         score_best = trainer.train()
@@ -223,9 +238,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("config", type=str)
     parser.add_argument("--logging-level", type=str, default="WARNING")
-    parser.add_argument(
-        "--mlflow-experiment", type=str, default="cv_resnet"
-    )  # useful for debugging
     args = parser.parse_args()
 
     filename_config = args.config
@@ -243,7 +255,9 @@ if __name__ == "__main__":
     mlflow_tracking_uri = config["shared"]["mlflow_tracking_uri"]
     mlflow.set_tracking_uri(mlflow_tracking_uri)
 
-    mlflow_experiment = args.mlflow_experiment
+    mlflow_experiment = config["metric_learning_resnet"].get(
+        "mlflow_experiment", "metric_learning_resnet"
+    )
     mlflow.set_experiment(mlflow_experiment)
 
     main(config)
