@@ -19,6 +19,7 @@ sys.path.append("../src")
 
 from PaintingDataset import PaintingDatasetTriplet as PaintingDataset
 from TrainerTriplet import TrainerTriplet as Trainer
+from ScorerClustering import ScorerClustering as Scorer
 from utils import load_config, get_abs_dirname
 
 
@@ -166,7 +167,13 @@ def main(config):
         )
         model = model.to(device)
 
-        mlflow.log_params({"model_name": model_name, "retrain_type": retrain_type, "embedding_size": embedding_size})
+        mlflow.log_params(
+            {
+                "model_name": model_name,
+                "retrain_type": retrain_type,
+                "embedding_size": embedding_size,
+            }
+        )
 
         label_weight = 1 / dataset_train.ann.label_code.value_counts().sort_index()
         mlflow.log_dict(label_weight.to_dict(), "label_weight.yml")
@@ -181,7 +188,17 @@ def main(config):
         else:
             raise NotImplementedError()
 
-        mlflow.log_params({"optimizer": optimizer_name, "lr": lr})
+        gamma = config["metric_learning_resnet"]["scheduler"]["gamma"]
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=gamma)
+
+        mlflow.log_params(
+            {
+                "optimizer": optimizer_name,
+                "lr": lr,
+                "scheduler": "ExponentialLR",
+                "gamma": gamma,
+            }
+        )
 
         ann_fold = dataset_train.ann
         code2label = (
@@ -191,6 +208,8 @@ def main(config):
         )
         code2label.sort_index(inplace=True)
 
+        scorer = Scorer()
+
         trainer = Trainer(
             model=model,
             optimizer=optimizer,
@@ -199,6 +218,9 @@ def main(config):
             dataloader_test=dataloader_test,
             params=config["metric_learning_resnet"],
             device=device,
+            code2label=code2label,
+            scheduler=scheduler,
+            scorer=scorer
         )
 
         score_best = trainer.train()

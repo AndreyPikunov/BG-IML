@@ -64,14 +64,16 @@ metric_learning_resnet:
   folds_use: [3]
 
   model_name: resnet18
-  retrain_type: fc  # options: full, fc, none
-  embedding_size: 3
+  retrain_type: full  # options: full, fc, none
+  embedding_size: 3  # well... 2^3 = 8
 
   n_epochs: 50
-  batch_size: 32
+  batch_size: 128
   optimizer:
     name: Adam
-    lr: 0.001 
+    lr: 0.0001
+  scheduler:
+    gamma: 0.9
     
   save_model_checkpoints: true
   mlflow_experiment: metric_learning_resnet
