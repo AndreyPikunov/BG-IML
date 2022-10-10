@@ -15,9 +15,9 @@ import sys
 
 sys.path.append("../src")
 
-from PaintingDataset import PaintingDatasetCombo as PaintingDataset
-from TrainerCombo import TrainerCombo as Trainer
-from ScorerCombo import ScorerCombo as Scorer
+from datasets import PaintingDatasetCombo as PaintingDataset
+from trainers import TrainerCombo as Trainer
+from scorers import ScorerCombo as Scorer
 from models import NNClassifier
 from losses import ComboLoss
 
