@@ -34,7 +34,7 @@ class ScorerCombo:
         X = self.numpify(embedding)
 
         precision, recall, fscore, _ = precision_recall_fscore_support(
-            true, pred, average="weighted"
+            true, pred, average="weighted", zero_division=0
         )
 
         scores_classification = dict(

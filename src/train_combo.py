@@ -103,7 +103,6 @@ def main(config):
         )
         dataloader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=False)
 
-        retrain_type = config["train_combo"]["retrain_type"]
         embedding_size = config["train_combo"]["embedding_size"]
 
         ann_fold = dataset_train.ann
@@ -123,7 +122,6 @@ def main(config):
         mlflow.log_params(
             {
                 "model_name": model_name,
-                "retrain_type": retrain_type,
                 "embedding_size": embedding_size,
                 "batch_size": batch_size,
                 "n_classes": n_classes,
@@ -140,6 +138,8 @@ def main(config):
         }
 
         criterion = ComboLoss(**kw_criterion)
+
+        mlflow.log_param("classification_weight", criterion.CE_weight)
 
         lr = config["train_combo"]["optimizer"]["lr"]
         optimizer_name = config["train_combo"]["optimizer"]["name"]

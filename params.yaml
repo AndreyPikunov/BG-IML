@@ -100,8 +100,7 @@ train_combo:
   folds_use: [3]
 
   model_name: resnet18
-  retrain_type: full  # options: full, fc, none
-  embedding_size: 8  # well... 2^3 = 8
+  embedding_size: 8
 
   n_epochs: 50
   batch_size: 32
@@ -110,8 +109,8 @@ train_combo:
   - 1
   - 2
   - 3
-  score_target: top_3_accuracy
-  classification_weight: 1.0
+  score_target: top_2_accuracy
+  classification_weight: 0.98
 
   optimizer:
     name: Adam

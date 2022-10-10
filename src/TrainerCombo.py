@@ -58,6 +58,7 @@ class TrainerCombo:
         optimizer = self.optimizer
 
         loss_batches = []
+        loss_supplement_batches = []
 
         a_embeddings = []
         a_predictions = []
@@ -81,7 +82,7 @@ class TrainerCombo:
 
             triplet = a_embedded, p_embedded, n_embedded
             a_true = a_true.to(device)
-            loss = criterion(a_pred, a_true, triplet)
+            loss, loss_supplement = criterion(a_pred, a_true, triplet)
 
             if train:
                 loss.backward()
@@ -92,11 +93,20 @@ class TrainerCombo:
             a_trues.append(a_true.detach())
 
             loss_batches.append(loss.item())
+            loss_supplement_batches.append(loss_supplement)
 
         if train:
             model.eval()
 
         loss = np.mean(loss_batches)
+
+        loss_supplement = {}
+        for key in loss_supplement_batches[0]:
+            value_sum = 0
+            for item in loss_supplement_batches:
+                value = item[key].item()
+                value_sum += value
+            loss_supplement[key] = value_sum / len(loss_supplement_batches)
 
         self.embeddings[step_name] = torch.concat(a_embeddings)
         self.predictions[step_name] = torch.concat(a_predictions)
@@ -111,7 +121,7 @@ class TrainerCombo:
         else:
             scores = {}
 
-        return loss, scores
+        return loss, loss_supplement, scores
 
     def train_model(self):
         return self.step()
@@ -124,15 +134,19 @@ class TrainerCombo:
 
         objectives = {}
 
-        loss, scores = self.train_model()
-        objectives["loss_train"] = loss
-        for key, value in scores.items():
-            objectives[f"{key}_train"] = value
+        step_names = "train", "test"
+        steps = self.train_model, self.test_model
 
-        loss, scores = self.test_model()
-        objectives["loss_test"] = loss
-        for key, value in scores.items():
-            objectives[f"{key}_test"] = value
+        for step_name, step in zip(step_names, steps):
+
+            loss, loss_supplement, scores = step()
+            objectives[f"loss_{step_name}"] = loss
+
+            for key, value in scores.items():
+                objectives[f"{key}_{step_name}"] = value
+
+            for key, value in loss_supplement.items():
+                objectives[f"{key}_{step_name}"] = value
 
         return objectives
 
@@ -261,15 +275,20 @@ class TrainerCombo:
                 letter = "xyz"[i]
                 df[letter] = X[:, i]
 
-
     def plot_embeddings(self, df, color="pred"):
 
-        args = dict(color=df[color], symbol=df["fold"], width=800, height=600)
+        args = dict(
+            color=color,
+            symbol="fold",
+            category_orders={color: self.code2label.values},
+            width=800,
+            height=600,
+        )
 
         if "z" in df:
-            fig = px.scatter_3d(x=df["x"], y=df["y"], z=df["z"], **args)
+            fig = px.scatter_3d(df, x="x", y="y", z="z", **args)
 
         else:
-            fig = px.scatter(x=df["x"], y=df["y"], **args)
+            fig = px.scatter(df, x="x", y="y", **args)
 
         return fig

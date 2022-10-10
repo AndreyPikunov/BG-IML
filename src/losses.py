@@ -31,9 +31,9 @@ class ComboLoss(nn.Module):
 
         supplement = {
             "loss_ce": loss_ce,
-            "loss_ce": loss_triplet,
+            "loss_triplet": loss_triplet,
             "loss_ce_weighted": loss_ce_weighted,
             "loss_triplet_weighted": loss_triplet_weighted,
         }
 
-        return loss
+        return loss, supplement
