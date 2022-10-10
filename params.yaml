@@ -68,7 +68,7 @@ metric_learning_resnet:
   embedding_size: 8  # well... 2^3 = 8
 
   n_epochs: 50
-  batch_size: 128
+  batch_size: 32
   optimizer:
     name: Adam
     lr: 0.0001
@@ -87,3 +87,37 @@ embedding_size_search:
   - 16
   - 64
   mlflow_experiment: metric_learning_resnet
+
+
+train_combo:
+  filename_design: data/design.csv
+  folder_images: data/raw/images
+
+  folder_output_model: models/train_combo/best
+  folder_output_report: reports/train_combo/best
+
+  column_fold: fold_author
+  folds_use: [3]
+
+  model_name: resnet18
+  retrain_type: full  # options: full, fc, none
+  embedding_size: 8  # well... 2^3 = 8
+
+  n_epochs: 50
+  batch_size: 32
+
+  top_k_list:
+  - 1
+  - 2
+  - 3
+  score_target: top_3_accuracy
+  classification_weight: 1.0
+
+  optimizer:
+    name: Adam
+    lr: 0.0001
+  scheduler:
+    gamma: 0.9
+    
+  save_model_checkpoints: true
+  mlflow_experiment: train_combo

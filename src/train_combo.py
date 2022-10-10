@@ -1,14 +1,12 @@
 import os
 import logging
 import argparse
-from itertools import chain
 
 import numpy as np
 import pandas as pd
 
 import torch
 from torch.utils.data import DataLoader
-from torch import nn
 from torchvision import transforms
 
 import mlflow
@@ -17,42 +15,13 @@ import sys
 
 sys.path.append("../src")
 
-from PaintingDataset import PaintingDatasetTriplet as PaintingDataset
-from TrainerTriplet import TrainerTriplet as Trainer
-from ScorerClustering import ScorerClustering as Scorer
+from PaintingDataset import PaintingDatasetCombo as PaintingDataset
+from TrainerCombo import TrainerCombo as Trainer
+from ScorerCombo import ScorerCombo as Scorer
+from models import NNClassifier
+from losses import ComboLoss
+
 from utils import load_config, get_abs_dirname, load_resnet
-
-
-def create_model(embedding_size, model_name, retrain_type="none"):
-
-    resnet_base, resnet_weights = load_resnet(model_name)
-
-    resnet = resnet_base(weights=resnet_weights.DEFAULT)
-    resnet_fc = resnet.fc
-
-    if retrain_type == "none":
-        for param in resnet.parameters():
-            param.requires_grad = False
-
-    if retrain_type == "fc":
-        for param in resnet.parameters():
-            param.requires_grad = False
-        resnet_fc.requires_grad = True
-
-    head = nn.Linear(resnet_fc.out_features, embedding_size)
-    model = nn.Sequential(resnet, head)
-
-    if retrain_type == "full":
-        parameters = model.parameters()
-    elif retrain_type == "fc":
-        parameters = chain(resnet_fc.parameters(), head.parameters())
-    else:
-        parameters = head.parameters()
-
-    model.eval()
-    logging.info(f"new {model_name} model was created")
-
-    return model, parameters
 
 
 def main(config):
@@ -63,11 +32,11 @@ def main(config):
 
     filename_design = os.path.join(
         config["shared"]["project_root"],
-        config["metric_learning_resnet"]["filename_design"],
+        config["train_combo"]["filename_design"],
     )
     ann = pd.read_csv(filename_design)
 
-    model_name = config["metric_learning_resnet"]["model_name"]
+    model_name = config["train_combo"]["model_name"]
     _, resnet_weights = load_resnet(model_name)
 
     transform_resnet = resnet_weights.DEFAULT.transforms()
@@ -83,25 +52,24 @@ def main(config):
         ]
     )
 
-    column_fold = config["metric_learning_resnet"]["column_fold"]
+    column_fold = config["train_combo"]["column_fold"]
 
-    folds_use = config["metric_learning_resnet"].get("folds_use")
+    folds_use = config["train_combo"].get("folds_use")
     if folds_use is None:
         folds_use = ann[column_fold].unique()
 
-    batch_size = config["metric_learning_resnet"]["batch_size"]
+    batch_size = config["train_combo"]["batch_size"]
     folder_images = os.path.join(
         config["shared"]["project_root"],
-        config["metric_learning_resnet"]["folder_images"],
+        config["train_combo"]["folder_images"],
     )
-
 
     keys = "folder_output_model", "folder_output_report"
     for key in keys:
         value = os.path.join(
-            config["shared"]["project_root"], config["metric_learning_resnet"][key]
+            config["shared"]["project_root"], config["train_combo"][key]
         )
-        config["metric_learning_resnet"][key] = value
+        config["train_combo"][key] = value
 
     score_best_folds = []
 
@@ -135,11 +103,21 @@ def main(config):
         )
         dataloader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=False)
 
-        retrain_type = config["metric_learning_resnet"]["retrain_type"]
-        embedding_size = config["metric_learning_resnet"]["embedding_size"]
-        model, parameters = create_model(
-            embedding_size, model_name, retrain_type=retrain_type
+        retrain_type = config["train_combo"]["retrain_type"]
+        embedding_size = config["train_combo"]["embedding_size"]
+
+        ann_fold = dataset_train.ann
+        code2label = (
+            ann_fold[["label", "label_code"]]
+            .drop_duplicates()
+            .set_index("label_code")["label"]
         )
+        code2label.sort_index(inplace=True)
+        n_classes = len(ann_fold.label.unique())
+        logging.info(f"n_classes: {n_classes}")
+
+        model = NNClassifier(model_name, embedding_size, n_classes=n_classes)
+        parameters = model.parameters()
         model = model.to(device)
 
         mlflow.log_params(
@@ -147,24 +125,31 @@ def main(config):
                 "model_name": model_name,
                 "retrain_type": retrain_type,
                 "embedding_size": embedding_size,
-                "batch_size": batch_size
+                "batch_size": batch_size,
+                "n_classes": n_classes,
             }
         )
 
         label_weight = 1 / dataset_train.ann.label_code.value_counts().sort_index()
         mlflow.log_dict(label_weight.to_dict(), "label_weight.yml")
 
-        criterion = nn.TripletMarginLoss()
+        kw_criterion = {
+            "classification_weight": config["train_combo"].get("classification_weight"),
+            "class_weights": torch.tensor(label_weight).float().to(device),
+            "label_smoothing": config["train_combo"].get("label_smoothing"),
+        }
 
-        lr = config["metric_learning_resnet"]["optimizer"]["lr"]
-        optimizer_name = config["metric_learning_resnet"]["optimizer"]["name"]
+        criterion = ComboLoss(**kw_criterion)
+
+        lr = config["train_combo"]["optimizer"]["lr"]
+        optimizer_name = config["train_combo"]["optimizer"]["name"]
 
         if optimizer_name == "Adam":
             optimizer = torch.optim.Adam(parameters, lr=lr)
         else:
             raise NotImplementedError()
 
-        gamma = config["metric_learning_resnet"]["scheduler"]["gamma"]
+        gamma = config["train_combo"]["scheduler"]["gamma"]
         scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=gamma)
 
         mlflow.log_params(
@@ -176,15 +161,11 @@ def main(config):
             }
         )
 
-        ann_fold = dataset_train.ann
-        code2label = (
-            ann_fold[["label", "label_code"]]
-            .drop_duplicates()
-            .set_index("label_code")["label"]
-        )
-        code2label.sort_index(inplace=True)
+        top_k_list = config["train_combo"]["top_k_list"]
+        scorer = Scorer(top_k_list, class_weight=label_weight, code2label=code2label)
+        mlflow.log_param("top_k", top_k_list)
 
-        scorer = Scorer()
+        score_target = config["train_combo"]["score_target"]
 
         trainer = Trainer(
             model=model,
@@ -192,11 +173,12 @@ def main(config):
             criterion=criterion,
             dataloader_train=dataloader_train,
             dataloader_test=dataloader_test,
-            params=config["metric_learning_resnet"],
+            params=config["train_combo"],
             device=device,
             code2label=code2label,
             scheduler=scheduler,
-            scorer=scorer
+            scorer=scorer,
+            score_target=score_target,
         )
 
         score_best = trainer.train()
@@ -231,9 +213,7 @@ if __name__ == "__main__":
     mlflow_tracking_uri = config["shared"]["mlflow_tracking_uri"]
     mlflow.set_tracking_uri(mlflow_tracking_uri)
 
-    mlflow_experiment = config["metric_learning_resnet"].get(
-        "mlflow_experiment", "metric_learning_resnet"
-    )
+    mlflow_experiment = config["train_combo"].get("mlflow_experiment", "train_combo")
     mlflow.set_experiment(mlflow_experiment)
 
     main(config)
