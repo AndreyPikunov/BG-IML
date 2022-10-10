@@ -34,7 +34,16 @@ def main(config):
         config["shared"]["project_root"],
         config["train_combo"]["filename_design"],
     )
+
     ann = pd.read_csv(filename_design)
+
+    labels_use = config["train_combo"].get("labels_use")
+    if labels_use is not None:
+        ann = ann[ann.label.isin(labels_use)]
+    else:
+        labels_use = "all"
+
+    ann["label_code"] = ann.label.astype("category").cat.codes
 
     model_name = config["train_combo"]["model_name"]
     _, resnet_weights = load_resnet(model_name)
@@ -83,6 +92,7 @@ def main(config):
         mlflow.log_dict(config, "config-runtime.yaml")
 
         mlflow.log_param("fold_index", fold_index)
+        mlflow.log_param("labels_use", labels_use)
 
         fold_index_str = str(fold_index)
 
@@ -114,6 +124,7 @@ def main(config):
         code2label.sort_index(inplace=True)
         n_classes = len(ann_fold.label.unique())
         logging.info(f"n_classes: {n_classes}")
+        mlflow.log_dict(code2label.to_dict(), "code2label.yml")
 
         model = NNClassifier(model_name, embedding_size, n_classes=n_classes)
         parameters = model.parameters()
@@ -133,7 +144,7 @@ def main(config):
 
         kw_criterion = {
             "classification_weight": config["train_combo"].get("classification_weight"),
-            "class_weights": torch.tensor(label_weight).float().to(device),
+            "class_weights": torch.tensor(label_weight.values).float().to(device),
             "label_smoothing": config["train_combo"].get("label_smoothing"),
         }
 

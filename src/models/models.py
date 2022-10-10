@@ -1,3 +1,5 @@
+from collections import OrderedDict
+
 from torch import nn
 
 from utils import load_resnet
@@ -5,21 +7,17 @@ from utils import load_resnet
 
 class Embedder(nn.Module):
     def __init__(self, resnet_name, embedding_size):
-
         super().__init__()
-
         resnet_base, resnet_weights = load_resnet(resnet_name)
-        resnet = resnet_base(weights=resnet_weights.DEFAULT)
-        resnet_fc = resnet.fc
-
-        head = nn.Sequential(
+        self.resnet = resnet_base(weights=resnet_weights.DEFAULT)
+        self.head = nn.Sequential(
             nn.ReLU(),
-            nn.Linear(resnet_fc.out_features, embedding_size)
+            nn.Linear(self.resnet.fc.out_features, embedding_size)
         )
-        self.model = nn.Sequential(resnet, head)
 
     def forward(self, x):
-        y = self.model(x)
+        y = self.resnet(x)
+        y = self.head(y)
         return y
 
 

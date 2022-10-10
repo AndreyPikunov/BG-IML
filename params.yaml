@@ -99,6 +99,11 @@ train_combo:
   column_fold: fold_author
   folds_use: [3]
 
+  # labels_use:
+  #   - japonism
+  #   - photo
+  #   - cubism
+
   model_name: resnet18
   embedding_size: 8
 
@@ -110,7 +115,7 @@ train_combo:
   - 2
   - 3
   score_target: top_2_accuracy
-  classification_weight: 0.98
+  classification_weight: 0.995
 
   optimizer:
     name: Adam

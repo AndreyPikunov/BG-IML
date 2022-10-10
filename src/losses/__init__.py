@@ -1,1 +1,1 @@
-from ComboLoss import ComboLoss
+from losses.ComboLoss import ComboLoss

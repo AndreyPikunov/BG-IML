@@ -1,1 +1,1 @@
-from models import Embedder, NNClassifier
+from models.models import Embedder, NNClassifier
