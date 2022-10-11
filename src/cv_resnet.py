@@ -17,9 +17,9 @@ import sys
 
 sys.path.append("../src")
 
-from PaintingDataset import PaintingDataset
-from Scorer import Scorer
-from Trainer import Trainer
+from datasets import PaintingDataset
+from scorers import Scorer
+from trainers import Trainer
 from utils import load_config, get_abs_dirname
 
 

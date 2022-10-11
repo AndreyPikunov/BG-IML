@@ -17,9 +17,9 @@ import sys
 
 sys.path.append("../src")
 
-from PaintingDataset import PaintingDatasetTriplet as PaintingDataset
-from TrainerTriplet import TrainerTriplet as Trainer
-from ScorerClustering import ScorerClustering as Scorer
+from datasets.PaintingDataset import PaintingDatasetTriplet as PaintingDataset
+from trainers import TrainerTriplet as Trainer
+from scorers import ScorerClustering as Scorer
 from utils import load_config, get_abs_dirname, load_resnet
 
 
