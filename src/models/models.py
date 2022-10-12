@@ -1,5 +1,3 @@
-from collections import OrderedDict
-
 from torch import nn
 
 from utils import load_resnet

@@ -11,32 +11,29 @@ from torchvision import transforms
 
 import mlflow
 
-import sys
+from datasets import PaintingDataset
+from trainers import TrainerEmbedder as Trainer
+from scorers import ScorerClustering as Scorer
+from models import Embedder
 
-sys.path.append("../src")
-
-from datasets import PaintingDatasetCombo as PaintingDataset
-from trainers import TrainerCombo as Trainer
-from scorers import ScorerCombo as Scorer
-from models import NNClassifier
-from losses import ComboLoss
+from pytorch_metric_learning import losses as pml_losses
 
 from utils import load_config, get_abs_dirname, load_resnet
 
 
 def main(config):
 
-    device = torch.device(config["train_combo"].get("device", "mps"))
+    device = torch.device(config["train_embedder"].get("device", "mps"))
     logging.info(f"device: {device}")
 
     filename_design = os.path.join(
         config["shared"]["project_root"],
-        config["train_combo"]["filename_design"],
+        config["train_embedder"]["filename_design"],
     )
 
     ann = pd.read_csv(filename_design)
 
-    labels_use = config["train_combo"].get("labels_use")
+    labels_use = config["train_embedder"].get("labels_use")
     if labels_use is not None:
         ann = ann[ann.label.isin(labels_use)]
     else:
@@ -44,7 +41,7 @@ def main(config):
 
     ann["label_code"] = ann.label.astype("category").cat.codes
 
-    model_name = config["train_combo"]["model_name"]
+    model_name = config["train_embedder"]["model_name"]
     _, resnet_weights = load_resnet(model_name)
 
     transform_resnet = resnet_weights.DEFAULT.transforms()
@@ -60,24 +57,24 @@ def main(config):
         ]
     )
 
-    column_fold = config["train_combo"]["column_fold"]
+    column_fold = config["train_embedder"]["column_fold"]
 
-    folds_use = config["train_combo"].get("folds_use")
+    folds_use = config["train_embedder"].get("folds_use")
     if folds_use is None:
         folds_use = ann[column_fold].unique()
 
-    batch_size = config["train_combo"]["batch_size"]
+    batch_size = config["train_embedder"]["batch_size"]
     folder_images = os.path.join(
         config["shared"]["project_root"],
-        config["train_combo"]["folder_images"],
+        config["train_embedder"]["folder_images"],
     )
 
     keys = "folder_output_model", "folder_output_report"
     for key in keys:
         value = os.path.join(
-            config["shared"]["project_root"], config["train_combo"][key]
+            config["shared"]["project_root"], config["train_embedder"][key]
         )
-        config["train_combo"][key] = value
+        config["train_embedder"][key] = value
 
     score_best_folds = []
 
@@ -100,11 +97,11 @@ def main(config):
         mask_train = ~(mask_test | mask_val)
 
         dataset_train = PaintingDataset(
-            ann[mask_train], folder_images, transform_train=transform_train
+            ann[mask_train], folder_images, transform_train=transform_train, apply_one_hot=False
         )
 
         dataset_test = PaintingDataset(
-            ann[mask_test], folder_images, transform_preprocess=transform_resnet
+            ann[mask_test], folder_images, transform_preprocess=transform_resnet, apply_one_hot=False
         )
 
         dataloader_train = DataLoader(
@@ -112,7 +109,7 @@ def main(config):
         )
         dataloader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=False)
 
-        embedding_size = config["train_combo"]["embedding_size"]
+        embedding_size = config["train_embedder"]["embedding_size"]
 
         ann_fold = dataset_train.ann
         code2label = (
@@ -125,7 +122,14 @@ def main(config):
         logging.info(f"n_classes: {n_classes}")
         mlflow.log_dict(code2label.to_dict(), "code2label.yml")
 
-        model = NNClassifier(model_name, embedding_size, n_classes=n_classes)
+        model = Embedder(model_name, embedding_size)
+
+        for param in model.resnet.parameters():
+            param.requires_grad = False
+        
+        for param in model.resnet.fc.parameters():
+            param.requires_grad = True
+
         parameters = model.parameters()
         model = model.to(device)
 
@@ -138,31 +142,45 @@ def main(config):
             }
         )
 
-        label_weight = 1 / dataset_train.ann.label_code.value_counts().sort_index()
-        mlflow.log_dict(label_weight.to_dict(), "label_weight.yml")
+        pairs = ("test", dataset_test), ("train", dataset_train)
+        # important! "train" MUST be the last
+        for name, dataset in pairs:
+            label_weight = 1 / dataset.ann.label_code.value_counts().sort_index()
+            label_weight = (label_weight / label_weight.sum()) * 100
+            mlflow.log_dict(label_weight.to_dict(), f"label-weight-{name}.yml")
 
-        kw_criterion = {
-            "classification_weight": config["train_combo"].get("classification_weight"),
-            "class_weights": torch.tensor(label_weight.values).float().to(device),
-            "label_smoothing": config["train_combo"].get("label_smoothing"),
-        }
+        if False:
+            kw_criterion = {
+                "margin": config["train_embedder"]["loss"]["margin"],
+            }
 
-        criterion = ComboLoss(**kw_criterion)
+            loss_name = config["train_embedder"]["loss"]["name"]
+            if loss_name == "TripletMarginLoss":
+                ...
+                # criterion = pml_losses.TripletMarginLoss(**kw_criterion)
+                # criterion = pml_losses.ContrastiveLoss(**kw_criterion)
 
-        mlflow.log_params({
-            "classification_weight": criterion.CE_weight,
-            "label_smoothing": kw_criterion["label_smoothing"]
-        })
+                # from pytorch_metric_learning import miners
+                # miner = miners.TripletMarginMiner()
+                # criterion = lambda x, y: loss(x, y, miner(x, y))
 
-        lr = config["train_combo"]["optimizer"]["lr"]
-        optimizer_name = config["train_combo"]["optimizer"]["name"]
+            else:
+                raise RuntimeError()
+
+                mlflow.log_params({"criterion": loss_name, **kw_criterion})
+
+        # criterion = pml_losses.ContrastiveLoss()
+        criterion = pml_losses.TripletMarginLoss(margin=1)
+
+        lr = config["train_embedder"]["optimizer"]["lr"]
+        optimizer_name = config["train_embedder"]["optimizer"]["name"]
 
         if optimizer_name == "Adam":
             optimizer = torch.optim.Adam(parameters, lr=lr)
         else:
             raise NotImplementedError()
 
-        gamma = config["train_combo"]["scheduler"]["gamma"]
+        gamma = config["train_embedder"]["scheduler"]["gamma"]
         scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=gamma)
 
         mlflow.log_params(
@@ -174,11 +192,8 @@ def main(config):
             }
         )
 
-        top_k_list = config["train_combo"]["top_k_list"]
-        scorer = Scorer(top_k_list, code2label=code2label)
-        mlflow.log_param("top_k", top_k_list)
-
-        score_target = config["train_combo"]["score_target"]
+        scorer = Scorer()
+        score_target = config["train_embedder"]["score_target"]
 
         trainer = Trainer(
             model=model,
@@ -186,7 +201,7 @@ def main(config):
             criterion=criterion,
             dataloader_train=dataloader_train,
             dataloader_test=dataloader_test,
-            params=config["train_combo"],
+            params=config["train_embedder"],
             device=device,
             code2label=code2label,
             scheduler=scheduler,
@@ -226,7 +241,7 @@ if __name__ == "__main__":
     mlflow_tracking_uri = config["shared"]["mlflow_tracking_uri"]
     mlflow.set_tracking_uri(mlflow_tracking_uri)
 
-    mlflow_experiment = config["train_combo"].get("mlflow_experiment", "train_combo")
+    mlflow_experiment = config["train_embedder"].get("mlflow_experiment", "train_embedder")
     mlflow.set_experiment(mlflow_experiment)
 
     main(config)

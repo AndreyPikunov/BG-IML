@@ -99,13 +99,13 @@ train_combo:
   column_fold: fold_author
   folds_use: [3]
 
-  # labels_use:
-  #   - japonism
-  #   - photo
-  #   - cubism
+  labels_use:
+    - japonism
+    - photo
+    - cubism
 
   model_name: resnet18
-  embedding_size: 64
+  embedding_size: 2
 
   n_epochs: 50
   batch_size: 32
@@ -126,6 +126,7 @@ train_combo:
     
   save_model_checkpoints: true
   mlflow_experiment: train_combo
+  device: mps
 
 
 classification_weight_search:
@@ -144,3 +145,42 @@ predict_combo_model:
     "mps"  
   filename_output:
     data/predictions/combo.csv
+
+
+train_embedder:
+  filename_design: data/design.csv
+  folder_images: data/raw/images
+
+  folder_output_model: models/train_embedder/best
+  folder_output_report: reports/train_embedder/best
+
+  column_fold: fold_author
+  folds_use: [3]
+
+  labels_use:
+    - japonism
+    - photo
+    - cubism
+
+  model_name: resnet18
+  embedding_size: 8
+
+  n_epochs: 50
+  batch_size: 32
+
+  score_target: silhouette_score
+
+  loss:
+    name: TripletMarginLoss
+    kw:
+      margin: 1
+
+  optimizer:
+    name: Adam
+    lr: 0.001
+  scheduler:
+    gamma: 0.9
+    
+  save_model_checkpoints: true
+  mlflow_experiment: train_embedder
+  device: mps
