@@ -97,7 +97,7 @@ def main(config):
     df = pd.concat([features, ann], axis=1)
 
     proba_pred = torch.nn.functional.softmax(Y_pred, dim=1)
-    proba_true = torch.nn.functional.softmax(Y_true, dim=1)
+    proba_true = Y_true
 
     for i, label in code2label.iteritems():
         key = f"proba_pred_{label}"

@@ -115,7 +115,8 @@ train_combo:
   - 2
   - 3
   score_target: top_2_accuracy
-  classification_weight: 0.99
+  classification_weight: 1.0
+  label_smoothing: 0.0
 
   optimizer:
     name: Adam
@@ -133,3 +134,13 @@ classification_weight_search:
   - 0.9
   - 0.5
   mlflow_experiment: train_combo
+
+
+predict_combo_model:
+  mlflow:
+    experiment_name: train_combo
+    run_id: f33a7cc06c914092a709e2c509ed125d
+  device:
+    "mps"  
+  filename_output:
+    data/predictions/combo.csv
