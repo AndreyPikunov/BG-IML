@@ -9,10 +9,9 @@ from sklearn.metrics import (
 
 
 class ScorerCombo:
-    def __init__(self, top_k_list=3, code2label=None, class_weight=None):
+    def __init__(self, top_k_list=3, code2label=None):
         self.code2label = code2label
         self.top_k_list = top_k_list
-        self.class_weight = class_weight
         self.n_classes = len(code2label)
         self.codes = list(range(self.n_classes))
 
@@ -28,6 +27,7 @@ class ScorerCombo:
 
     def __call__(self, pred, true, embedding):
 
+        class_weight = true.mean(axis=0).cpu().numpy()
         pred_scores = self.numpify(pred)
         pred = self.prepare_y(pred)
         true = self.prepare_y(true)
@@ -43,7 +43,7 @@ class ScorerCombo:
             fscore=fscore,
         )
 
-        sample_weight = [self.class_weight[i] for i in true]
+        sample_weight = [class_weight[i] for i in true]
 
         for k in self.top_k_list:
             acc = top_k_accuracy_score(true, pred_scores, k=k, sample_weight=sample_weight, labels=self.codes)

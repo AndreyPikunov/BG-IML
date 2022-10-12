@@ -150,7 +150,10 @@ def main(config):
 
         criterion = ComboLoss(**kw_criterion)
 
-        mlflow.log_param("classification_weight", criterion.CE_weight)
+        mlflow.log_params({
+            "classification_weight": criterion.CE_weight,
+            "label_smoothing": kw_criterion["label_smoothing"]
+        })
 
         lr = config["train_combo"]["optimizer"]["lr"]
         optimizer_name = config["train_combo"]["optimizer"]["name"]
@@ -173,7 +176,7 @@ def main(config):
         )
 
         top_k_list = config["train_combo"]["top_k_list"]
-        scorer = Scorer(top_k_list, class_weight=label_weight, code2label=code2label)
+        scorer = Scorer(top_k_list, code2label=code2label)
         mlflow.log_param("top_k", top_k_list)
 
         score_target = config["train_combo"]["score_target"]
