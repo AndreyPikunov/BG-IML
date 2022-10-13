@@ -99,13 +99,13 @@ train_combo:
   column_fold: fold_author
   folds_use: [3]
 
-  labels_use:
-    - japonism
-    - photo
-    - cubism
+  # labels_use:
+  #   - japonism
+  #   - photo
+  #   - cubism
 
-  model_name: resnet18
-  embedding_size: 2
+  model_name: resnet50
+  embedding_size: 64
 
   n_epochs: 50
   batch_size: 32
@@ -157,30 +157,67 @@ train_embedder:
   column_fold: fold_author
   folds_use: [3]
 
-  labels_use:
-    - japonism
-    - photo
-    - cubism
+  # labels_use:
+  #   # - japonism
+  #   - photo
+  #   - cubism
 
   model_name: resnet18
-  embedding_size: 8
+  embedding_size: 16
+  freeze_resnet_cnn: true
+  freeze_resnet_fc: false
 
-  n_epochs: 50
+  n_epochs: 100
   batch_size: 32
 
   score_target: silhouette_score
 
   loss:
-    name: TripletMarginLoss
-    kw:
-      margin: 1
+    name: ArcFaceLoss
+    use_class_weight: True 
+
+  optimizer_loss:
+    lr: 0.001
 
   optimizer:
-    name: Adam
     lr: 0.001
+    weight_decay: 0
+
   scheduler:
-    gamma: 0.9
+    gamma: 0.99
     
-  save_model_checkpoints: true
+  save_model_checkpoints: false
   mlflow_experiment: train_embedder
   device: mps
+
+
+optunize_random_forest:
+
+  filename_input: "./data/predictions/combo.csv"
+
+  n_trials: 100
+
+  column_fold: fold_author
+
+  folds_use:
+  - 3
+
+  hyperparams:
+    n_estimators:
+      min: 10
+      max: 1000
+    max_depth: 
+      min: 2
+      max: 32
+    min_samples_leaf:
+      min: 1
+      max: 32
+    min_samples_split:
+      min: 2
+      max: 32
+
+  use_pca:
+    - true
+    - false
+
+  mlflow_experiment: optunize_random_forest

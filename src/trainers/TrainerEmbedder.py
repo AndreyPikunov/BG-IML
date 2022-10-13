@@ -10,6 +10,8 @@ from umap import UMAP
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 
+from pytorch_metric_learning import miners
+miner = miners.TripletMarginMiner(margin=1., type_of_triplets="semihard")
 
 class TrainerEmbedder:
     def __init__(
@@ -25,6 +27,7 @@ class TrainerEmbedder:
         params,
         code2label,
         device,
+        optimizer_loss
     ):
 
         self.device = device
@@ -44,6 +47,8 @@ class TrainerEmbedder:
         self.scheduler = scheduler
         self.scorer = scorer
         self.score_target = score_target
+
+        self.optimizer_loss = optimizer_loss
 
     def step(self, train=True):
 
@@ -72,12 +77,17 @@ class TrainerEmbedder:
 
             if train:
                 optimizer.zero_grad()
+                self.optimizer_loss.zero_grad()
+
+            # hard_pairs = miner(embedding, y)
+            # loss = criterion(embedding, y, hard_pairs)
 
             loss = criterion(embedding, y)
 
             if train:
                 loss.backward()
                 optimizer.step()
+                self.optimizer_loss.step()
 
             a_embeddings.append(embedding.detach())
             a_trues.append(y.detach())

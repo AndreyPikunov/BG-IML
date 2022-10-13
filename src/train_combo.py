@@ -125,7 +125,14 @@ def main(config):
         logging.info(f"n_classes: {n_classes}")
         mlflow.log_dict(code2label.to_dict(), "code2label.yml")
 
-        model = NNClassifier(model_name, embedding_size, n_classes=n_classes)
+        params_embedder=dict(
+            resnet_name=model_name,
+            embedding_size=embedding_size,
+            freeze_resnet_cnn=False,
+            freeze_resnet_fc=False
+        )
+
+        model = NNClassifier(n_classes, params_embedder=params_embedder)
         parameters = model.parameters()
         model = model.to(device)
 

@@ -16,7 +16,7 @@ from trainers import TrainerEmbedder as Trainer
 from scorers import ScorerClustering as Scorer
 from models import Embedder
 
-from pytorch_metric_learning import losses as pml_losses
+from pytorch_metric_learning import losses, reducers
 
 from utils import load_config, get_abs_dirname, load_resnet
 
@@ -124,12 +124,6 @@ def main(config):
 
         model = Embedder(model_name, embedding_size)
 
-        for param in model.resnet.parameters():
-            param.requires_grad = False
-        
-        for param in model.resnet.fc.parameters():
-            param.requires_grad = True
-
         parameters = model.parameters()
         model = model.to(device)
 
@@ -142,6 +136,23 @@ def main(config):
             }
         )
 
+        lr = config["train_embedder"]["optimizer"]["lr"]
+        weight_decay = config["train_embedder"]["optimizer"].get("weight_decay", 0)
+        optimizer = torch.optim.Adam(parameters, lr=lr, weight_decay=weight_decay)
+
+        gamma = config["train_embedder"]["scheduler"]["gamma"]
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=gamma)
+
+        mlflow.log_params(
+            {
+                "optimizer": "Adam",
+                "lr": lr,
+                "weight_decay": weight_decay,
+                "scheduler": "ExponentialLR",
+                "gamma": gamma,
+            }
+        )
+
         pairs = ("test", dataset_test), ("train", dataset_train)
         # important! "train" MUST be the last
         for name, dataset in pairs:
@@ -149,48 +160,36 @@ def main(config):
             label_weight = (label_weight / label_weight.sum()) * 100
             mlflow.log_dict(label_weight.to_dict(), f"label-weight-{name}.yml")
 
-        if False:
-            kw_criterion = {
-                "margin": config["train_embedder"]["loss"]["margin"],
-            }
-
-            loss_name = config["train_embedder"]["loss"]["name"]
-            if loss_name == "TripletMarginLoss":
-                ...
-                # criterion = pml_losses.TripletMarginLoss(**kw_criterion)
-                # criterion = pml_losses.ContrastiveLoss(**kw_criterion)
-
-                # from pytorch_metric_learning import miners
-                # miner = miners.TripletMarginMiner()
-                # criterion = lambda x, y: loss(x, y, miner(x, y))
-
-            else:
-                raise RuntimeError()
-
-                mlflow.log_params({"criterion": loss_name, **kw_criterion})
-
-        # criterion = pml_losses.ContrastiveLoss()
-        criterion = pml_losses.TripletMarginLoss(margin=1)
-
-        lr = config["train_embedder"]["optimizer"]["lr"]
-        optimizer_name = config["train_embedder"]["optimizer"]["name"]
-
-        if optimizer_name == "Adam":
-            optimizer = torch.optim.Adam(parameters, lr=lr)
+        loss_name = config["train_embedder"]["loss"]["name"]
+        
+        use_class_weight = config["train_embedder"]["loss"]["use_class_weight"]
+        if use_class_weight:
+            weights = torch.tensor(label_weight.values).float()
+            reducer = reducer=reducers.ClassWeightedReducer(weights=weights)
         else:
-            raise NotImplementedError()
+            reducer = None  # reducers.MeanReducer()
 
-        gamma = config["train_embedder"]["scheduler"]["gamma"]
-        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=gamma)
+        kw_criterion = config["train_embedder"]["loss"].get("kw", dict())
 
-        mlflow.log_params(
-            {
-                "optimizer": optimizer_name,
-                "lr": lr,
-                "scheduler": "ExponentialLR",
-                "gamma": gamma,
-            }
-        )
+        if loss_name == "ArcFaceLoss":
+            criterion = losses.ArcFaceLoss(
+                num_classes=n_classes,
+                embedding_size=embedding_size,
+                reducer=reducer,
+                **kw_criterion
+            )
+        else:
+            raise RuntimeError()
+
+        lr = config["train_embedder"]["optimizer_loss"]["lr"]
+        optimizer_loss = torch.optim.Adam(criterion.parameters(), lr=lr)
+
+        mlflow.log_params({
+            "criterion": loss_name,
+            "use_class_weight": use_class_weight,
+            "lr_loss": lr,
+            **kw_criterion
+        })
 
         scorer = Scorer()
         score_target = config["train_embedder"]["score_target"]
@@ -207,6 +206,7 @@ def main(config):
             scheduler=scheduler,
             scorer=scorer,
             score_target=score_target,
+            optimizer_loss=optimizer_loss
         )
 
         score_best = trainer.train()
