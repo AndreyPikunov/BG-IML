@@ -1,4 +1,5 @@
 import os
+import logging
 
 import torch
 import numpy as np
@@ -10,14 +11,11 @@ from umap import UMAP
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 
-from pytorch_metric_learning import miners
-miner = miners.TripletMarginMiner(margin=1., type_of_triplets="semihard")
-
 class TrainerEmbedder:
     def __init__(
         self,
         model,
-        optimizer,
+        optimizers,
         scheduler,
         dataloader_train,
         dataloader_test,
@@ -25,15 +23,15 @@ class TrainerEmbedder:
         scorer,
         score_target,
         params,
-        code2label,
-        device,
-        optimizer_loss
+        code2label_train,
+        code2label_test,
+        device
     ):
 
         self.device = device
         self.model = model.to(device)
 
-        self.optimizer = optimizer
+        self.optimizers = optimizers
         self.criterion = criterion
 
         self.dataloader = {"train": dataloader_train, "test": dataloader_test}
@@ -43,64 +41,58 @@ class TrainerEmbedder:
         self.embeddings = {"train": None, "test": None}
         self.trues = {"train": None, "test": None}
 
-        self.code2label = code2label
+        self.code2label = {"train": code2label_train, "test": code2label_test}
         self.scheduler = scheduler
         self.scorer = scorer
         self.score_target = score_target
-
-        self.optimizer_loss = optimizer_loss
 
     def step(self, train=True):
 
         step_name = "train" if train else "test"
 
         device = self.device
-        model = self.model
-
         dataloader = self.dataloader[step_name]
-        criterion = self.criterion
-        optimizer = self.optimizer
 
         loss_batches = []
 
-        a_embeddings = []
-        a_trues = []
+        embeddings = []
+        trues = []
 
         if train:
-            model.train()
+            self.model.train()
 
         for x, y in dataloader:
 
             # y = y.to(device)
             x = x.to(device)
-            embedding = model(x)
+            embedding = self.model(x)
 
             if train:
-                optimizer.zero_grad()
-                self.optimizer_loss.zero_grad()
+                
+                for opt in self.optimizers:
+                    opt.zero_grad()
 
-            # hard_pairs = miner(embedding, y)
-            # loss = criterion(embedding, y, hard_pairs)
+                msg = f"{x.shape} {y.shape} {embedding.shape}"
+                logging.debug(msg)
 
-            loss = criterion(embedding, y)
-
-            if train:
+                loss = self.criterion(embedding, y)
                 loss.backward()
-                optimizer.step()
-                self.optimizer_loss.step()
 
-            a_embeddings.append(embedding.detach())
-            a_trues.append(y.detach())
+                for opt in self.optimizers:
+                    opt.step()
 
-            loss_batches.append(loss.item())
+                loss_batches.append(loss.item())
+
+            embeddings.append(embedding.detach())
+            trues.append(y.detach())
 
         if train:
-            model.eval()
+            self.model.eval()
 
-        loss = np.mean(loss_batches)
+        loss = np.mean(loss_batches) if train else 0.
       
-        self.embeddings[step_name] = torch.concat(a_embeddings)
-        self.trues[step_name] = torch.concat(a_trues)
+        self.embeddings[step_name] = torch.concat(embeddings)
+        self.trues[step_name] = torch.concat(trues)
 
         if self.scorer:
             scores = self.scorer(
@@ -152,8 +144,9 @@ class TrainerEmbedder:
 
                 objectives = self.train_epoch()
 
-                lr = self.optimizer.param_groups[0]["lr"]
-                mlflow.log_metric("lr", lr, step=epoch)
+                for i, opt in enumerate(self.optimizers):
+                    lr = opt.param_groups[0]["lr"]
+                    mlflow.log_metric(f"lr-{i}", lr, step=epoch)
 
                 if self.scheduler is not None:
                     self.scheduler.step()
@@ -168,6 +161,9 @@ class TrainerEmbedder:
 
                 df = self.collect_embeddings()
                 self.update_plot_columns(df)
+
+                filename = f"predictions/data-{epoch:03d}.csv"
+                mlflow.log_text(df.to_csv(), filename)
 
                 fig = self.plot_embeddings(df)
                 filename = f"figures/embeddings-{epoch:03d}.html"
@@ -199,9 +195,10 @@ class TrainerEmbedder:
         torch.save(model.state_dict(), filename_save_model_st)
         mlflow.log_artifact(filename_save_model_st)
 
-        filename_save_optimizer_st = os.path.join(folder_output_model, "optimizer.st")
-        torch.save(self.optimizer.state_dict(), filename_save_optimizer_st)
-        mlflow.log_artifact(filename_save_optimizer_st)
+        for i, opt in enumerate(self.optimizers):
+            filename_save_optimizer_st = os.path.join(folder_output_model, f"optimizer-{i}.st")
+            torch.save(opt.state_dict(), filename_save_optimizer_st)
+            mlflow.log_artifact(filename_save_optimizer_st)
 
         # filename_save_model_pt = os.path.join(folder_output_model, "model.pt")
         # model_scripted = torch.jit.script(model)
@@ -216,18 +213,16 @@ class TrainerEmbedder:
         emb_test = self.embeddings["test"]
         data = torch.concat([emb_train, emb_test]).cpu().numpy()
 
-        true_train = self.trues["train"]
-        true_test = self.trues["test"]
-        true = torch.concat([true_train, true_test]).cpu().numpy()
-
         df = pd.DataFrame(data)
 
+        true_train = [self.code2label["train"][i.item()] for i in self.trues["train"]]
+        true_test = [self.code2label["test"][i.item()] for i in self.trues["test"]]
+        true = true_train + true_test
         df["true"] = true
-        df["true"].replace(self.code2label, inplace=True)
 
-        n_train = len(emb_train)
+        n_train = len(true_train)
         df["fold"] = "test"
-        df.loc[:n_train, "fold"] = "train"
+        df.iloc[:n_train, "fold"] = "train"
 
         df.sort_values("true", inplace=True)
 
@@ -253,12 +248,11 @@ class TrainerEmbedder:
                 letter = "xyz"[i]
                 df[letter] = X[:, i]
 
-    def plot_embeddings(self, df, color="true"):
+    def plot_embeddings(self, df):
 
         args = dict(
-            color=color,
+            color="true",
             symbol="fold",
-            category_orders={color: self.code2label.values},
             width=800,
             height=600,
         )

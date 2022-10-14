@@ -15,182 +15,6 @@ design:
   val_size: 0.05
 
 
-cv_resnet:
-  filename_design: data/design.csv
-  folder_images: data/raw/images
-
-  folder_output_model: models/cv_resnet/best
-  folder_output_report: reports/cv_resnet/best
-
-  column_fold: fold_author
-  folds_use: [3]
-
-  model_name: resnet18
-  retrain_type: full  # options: full, fc, none
-
-  n_epochs: 50
-  batch_size: 32
-  optimizer:
-    name: Adam
-    lr: 0.00001 
-    
-  label_smoothing: 0.0
-
-  save_model_checkpoints: true
-
-
-optunize_resnet:
-  n_trials: 10
-  base_model_list:
-  - resnet18
-  # - resnet34
-  # - resnet50
-  retrain_type_list:
-  # - fc
-  - full
-  lr:
-    min: 0.00001
-    max: 0.001
-
-
-metric_learning_resnet:
-  filename_design: data/design.csv
-  folder_images: data/raw/images
-
-  folder_output_model: models/metric_learning_resnet/best
-  folder_output_report: reports/metric_learning_resnet/best
-
-  column_fold: fold_author
-  folds_use: [3]
-
-  model_name: resnet18
-  retrain_type: full  # options: full, fc, none
-  embedding_size: 8  # well... 2^3 = 8
-
-  n_epochs: 50
-  batch_size: 32
-  optimizer:
-    name: Adam
-    lr: 0.0001
-  scheduler:
-    gamma: 0.9
-    
-  save_model_checkpoints: true
-  mlflow_experiment: metric_learning_resnet
-
-
-embedding_size_search:
-  model_name: resnet18
-  retrain_type: full
-  embedding_size_list:
-  - 8
-  - 16
-  - 64
-  mlflow_experiment: metric_learning_resnet
-
-
-train_combo:
-  filename_design: data/design.csv
-  folder_images: data/raw/images
-
-  folder_output_model: models/train_combo/best
-  folder_output_report: reports/train_combo/best
-
-  column_fold: fold_author
-  folds_use: [3]
-
-  # labels_use:
-  #   - japonism
-  #   - photo
-  #   - cubism
-
-  model_name: resnet50
-  embedding_size: 64
-
-  n_epochs: 50
-  batch_size: 32
-
-  top_k_list:
-  - 1
-  - 2
-  - 3
-  score_target: top_2_accuracy
-  classification_weight: 1.0
-  label_smoothing: 0.0
-
-  optimizer:
-    name: Adam
-    lr: 0.0001
-  scheduler:
-    gamma: 0.9
-    
-  save_model_checkpoints: true
-  mlflow_experiment: train_combo
-  device: mps
-
-
-classification_weight_search:
-  classification_weight_list:
-  - 1.0
-  - 0.9
-  - 0.5
-  mlflow_experiment: train_combo
-
-
-predict_combo_model:
-  mlflow:
-    experiment_name: train_combo
-    run_id: f33a7cc06c914092a709e2c509ed125d
-  device:
-    "mps"  
-  filename_output:
-    data/predictions/combo.csv
-
-
-train_embedder:
-  filename_design: data/design.csv
-  folder_images: data/raw/images
-
-  folder_output_model: models/train_embedder/best
-  folder_output_report: reports/train_embedder/best
-
-  column_fold: fold_author
-  folds_use: [3]
-
-  # labels_use:
-  #   # - japonism
-  #   - photo
-  #   - cubism
-
-  model_name: resnet18
-  embedding_size: 16
-  freeze_resnet_cnn: true
-  freeze_resnet_fc: false
-
-  n_epochs: 100
-  batch_size: 32
-
-  score_target: silhouette_score
-
-  loss:
-    name: ArcFaceLoss
-    use_class_weight: True 
-
-  optimizer_loss:
-    lr: 0.001
-
-  optimizer:
-    lr: 0.001
-    weight_decay: 0
-
-  scheduler:
-    gamma: 0.99
-    
-  save_model_checkpoints: false
-  mlflow_experiment: train_embedder
-  device: mps
-
-
 optunize_random_forest:
 
   filename_input: "./data/predictions/combo.csv"
@@ -221,3 +45,120 @@ optunize_random_forest:
     - false
 
   mlflow_experiment: optunize_random_forest
+
+
+train_nn_classifier:
+  filename_design: data/design.csv
+  folder_images: data/raw/images
+
+  folder_output_model: models/train_nn_classifier/best
+  folder_output_report: reports/train_nn_classifier/best
+
+  column_fold: fold_author
+  folds_use: [0, 1, 2, 3]
+
+  # labels_use:
+  #   # - japonism
+  #   - photo
+  #   - cubism
+
+  params_embedder:
+    resnet_name: resnet18
+    embedding_size: 16
+    freeze_resnet_cnn: false
+    freeze_resnet_fc: false
+
+  n_epochs: 50
+  batch_size: 32
+
+  top_k_list:
+  - 1
+  - 2
+  - 3
+  score_target: top_2_accuracy
+  label_smoothing: 0.0
+
+  optimizer:
+    lr: 0.0001
+    weight_decay: 0.
+  scheduler:
+    # gamma = np.power(lr_final / lr, 1 / n_epochs)
+    lr_final: 0.00001
+    
+  save_model_checkpoints: true
+  mlflow_experiment: train_nn_classifier
+  device: mps
+
+
+optunize_nn_classifier:
+  n_trials: 100
+
+  resnet_name_list:
+  - resnet18
+  # - resnet34
+  - resnet50
+
+  freeze_resnet_fc_list:
+  - true
+  # - false
+
+  freeze_resnet_cnn_list:
+  - true
+  - false
+
+  lr:
+    min: 0.0001
+    max: 0.01
+
+  embedding_size:
+    min: 2
+    max: 64
+    
+  mlflow_experiment: train_nn_classifier
+
+
+predict_nn_classifier:
+  mlflow:
+    experiment_name: train_nn_classifier
+    run_id: ca8ff65afb5744a2bde060f116d70a22
+  device:
+    "mps"  
+  folder_output:
+    data/predictions
+
+
+train_embedder:
+  filename_design: data/design.csv
+  folder_images: data/raw/images
+
+  folder_output_model: models/train_embedder/best
+  folder_output_report: reports/train_embedder/best
+
+  score_target: silhouette_score
+
+  labels_test:
+    - photo
+    - naturalism
+
+  params_embedder:
+    resnet_name: resnet18
+    embedding_size: 3
+    freeze_resnet_cnn: false
+    freeze_resnet_fc: false
+
+  n_epochs: 100
+  batch_size: 32
+
+  optimizer:
+    lr: 0.0001
+    weight_decay: 0
+
+  optimizer_loss:
+    lr: 0.001
+
+  scheduler:
+    lr_final: 0.00001
+    
+  save_model_checkpoints: false
+  mlflow_experiment: train_embedder
+  device: mps

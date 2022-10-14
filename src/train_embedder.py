@@ -41,8 +41,8 @@ def main(config):
 
     ann["label_code"] = ann.label.astype("category").cat.codes
 
-    model_name = config["train_embedder"]["model_name"]
-    _, resnet_weights = load_resnet(model_name)
+    resnet_name = config["train_embedder"]["params_embedder"]["resnet_name"]
+    _, resnet_weights = load_resnet(resnet_name)
 
     transform_resnet = resnet_weights.DEFAULT.transforms()
     transform_train = transforms.Compose(
@@ -57,12 +57,7 @@ def main(config):
         ]
     )
 
-    column_fold = config["train_embedder"]["column_fold"]
-
-    folds_use = config["train_embedder"].get("folds_use")
-    if folds_use is None:
-        folds_use = ann[column_fold].unique()
-
+    labels_test = config["train_embedder"]["labels_test"]
     batch_size = config["train_embedder"]["batch_size"]
     folder_images = os.path.join(
         config["shared"]["project_root"],
@@ -78,142 +73,126 @@ def main(config):
 
     score_best_folds = []
 
-    for fold_index in folds_use:
+    mlflow.start_run()
 
-        if fold_index == "val":
-            continue
+    mlflow.log_dict(config, "config-runtime.yaml")
 
-        mlflow.start_run()
+    mlflow.log_param("labels_use", labels_use)
 
-        mlflow.log_dict(config, "config-runtime.yaml")
+    mask_val = ann.fold_author == "val"
+    mask_test = ann.label.isin(labels_test) & (~mask_val)
+    mask_train = ~(mask_test | mask_val)
 
-        mlflow.log_param("fold_index", fold_index)
-        mlflow.log_param("labels_use", labels_use)
+    dataset_train = PaintingDataset(
+        ann[mask_train],
+        folder_images,
+        transform_train=transform_train,
+        apply_one_hot=False,
+        remake_label_code=True
+    )
 
-        fold_index_str = str(fold_index)
+    dataset_test = PaintingDataset(
+        ann[mask_test],
+        folder_images,
+        transform_preprocess=transform_resnet,
+        apply_one_hot=False,
+        remake_label_code=True
+    )
 
-        mask_test = ann.fold_author == fold_index_str
-        mask_val = ann.fold_author == "val"
-        mask_train = ~(mask_test | mask_val)
+    dataloader_train = DataLoader(
+        dataset_train, batch_size=batch_size, shuffle=True
+    )
+    dataloader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=False)
 
-        dataset_train = PaintingDataset(
-            ann[mask_train], folder_images, transform_train=transform_train, apply_one_hot=False
-        )
+    n_classes = len(dataset_train.ann.label.unique())
+    logging.info(f"n_classes: {n_classes}")
+    mlflow.log_param("n_classes", n_classes)
 
-        dataset_test = PaintingDataset(
-            ann[mask_test], folder_images, transform_preprocess=transform_resnet, apply_one_hot=False
-        )
+    code2label_dict = {}
 
-        dataloader_train = DataLoader(
-            dataset_train, batch_size=batch_size, shuffle=True
-        )
-        dataloader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=False)
-
-        embedding_size = config["train_embedder"]["embedding_size"]
-
-        ann_fold = dataset_train.ann
+    for name, dataset in (("train", dataset_train), ("test", dataset_test)):
+        ann_dataset = dataset.ann
         code2label = (
-            ann_fold[["label", "label_code"]]
+            ann_dataset[["label", "label_code"]]
             .drop_duplicates()
             .set_index("label_code")["label"]
         )
         code2label.sort_index(inplace=True)
-        n_classes = len(ann_fold.label.unique())
-        logging.info(f"n_classes: {n_classes}")
-        mlflow.log_dict(code2label.to_dict(), "code2label.yml")
+        code2label_dict[name] = code2label
+        mlflow.log_dict(code2label.to_dict(), f"code2label-{name}.yml")
 
-        model = Embedder(model_name, embedding_size)
+    params_embedder = config["train_embedder"]["params_embedder"]
+    model = Embedder(**params_embedder)
 
-        parameters = model.parameters()
-        model = model.to(device)
+    parameters = model.parameters()
+    model = model.to(device)
 
-        mlflow.log_params(
-            {
-                "model_name": model_name,
-                "embedding_size": embedding_size,
-                "batch_size": batch_size,
-                "n_classes": n_classes,
-            }
-        )
+    lr = config["train_embedder"]["optimizer"]["lr"]
+    weight_decay = config["train_embedder"]["optimizer"].get("weight_decay", 0)
+    optimizer = torch.optim.Adam(parameters, lr=lr, weight_decay=weight_decay)
 
-        lr = config["train_embedder"]["optimizer"]["lr"]
-        weight_decay = config["train_embedder"]["optimizer"].get("weight_decay", 0)
-        optimizer = torch.optim.Adam(parameters, lr=lr, weight_decay=weight_decay)
+    lr_final = config["train_embedder"]["scheduler"]["lr_final"]
+    n_epochs = config["train_embedder"]["n_epochs"]
+    gamma = np.power(lr_final / lr, 1 / n_epochs)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=gamma)
 
-        gamma = config["train_embedder"]["scheduler"]["gamma"]
-        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=gamma)
+    mlflow.log_params(
+        {
+            "optimizer": "Adam",
+            "lr": lr,
+            "lr_final": lr_final,
+            "weight_decay": weight_decay,
+            "scheduler": "ExponentialLR",
+            "gamma": gamma,
+        }
+    )
 
-        mlflow.log_params(
-            {
-                "optimizer": "Adam",
-                "lr": lr,
-                "weight_decay": weight_decay,
-                "scheduler": "ExponentialLR",
-                "gamma": gamma,
-            }
-        )
+    label_weight = 1 / dataset_train.ann.label_code.value_counts().sort_index()
+    label_weight = (label_weight / label_weight.sum()) * 100
+    mlflow.log_dict(label_weight.to_dict(), f"label-weight.yml")
 
-        pairs = ("test", dataset_test), ("train", dataset_train)
-        # important! "train" MUST be the last
-        for name, dataset in pairs:
-            label_weight = 1 / dataset.ann.label_code.value_counts().sort_index()
-            label_weight = (label_weight / label_weight.sum()) * 100
-            mlflow.log_dict(label_weight.to_dict(), f"label-weight-{name}.yml")
+    criterion = losses.ArcFaceLoss(
+        num_classes=n_classes,
+        embedding_size=params_embedder["embedding_size"],
+        reducer=reducers.ClassWeightedReducer(
+            weights=torch.tensor(label_weight.values).float()
+        ),
+    )
 
-        loss_name = config["train_embedder"]["loss"]["name"]
-        
-        use_class_weight = config["train_embedder"]["loss"]["use_class_weight"]
-        if use_class_weight:
-            weights = torch.tensor(label_weight.values).float()
-            reducer = reducer=reducers.ClassWeightedReducer(weights=weights)
-        else:
-            reducer = None  # reducers.MeanReducer()
+    lr = config["train_embedder"]["optimizer_loss"]["lr"]
+    optimizer_loss = torch.optim.Adam(criterion.parameters(), lr=lr)
 
-        kw_criterion = config["train_embedder"]["loss"].get("kw", dict())
+    mlflow.log_params({
+        "criterion": "ArcFaceLoss",
+        "use_class_weight": True,
+        "lr_loss": lr,
+    })
 
-        if loss_name == "ArcFaceLoss":
-            criterion = losses.ArcFaceLoss(
-                num_classes=n_classes,
-                embedding_size=embedding_size,
-                reducer=reducer,
-                **kw_criterion
-            )
-        else:
-            raise RuntimeError()
+    scorer = Scorer()
+    score_target = config["train_embedder"]["score_target"]
 
-        lr = config["train_embedder"]["optimizer_loss"]["lr"]
-        optimizer_loss = torch.optim.Adam(criterion.parameters(), lr=lr)
+    optimizers = optimizer, optimizer_loss
 
-        mlflow.log_params({
-            "criterion": loss_name,
-            "use_class_weight": use_class_weight,
-            "lr_loss": lr,
-            **kw_criterion
-        })
+    trainer = Trainer(
+        model=model,
+        optimizers=optimizers,
+        criterion=criterion,
+        dataloader_train=dataloader_train,
+        dataloader_test=dataloader_test,
+        params=config["train_embedder"],
+        device=device,
+        code2label_train=code2label_dict["train"],
+        code2label_test=code2label_dict["test"],
+        scheduler=scheduler,
+        scorer=scorer,
+        score_target=score_target
+    )
 
-        scorer = Scorer()
-        score_target = config["train_embedder"]["score_target"]
+    score_best = trainer.train()
 
-        trainer = Trainer(
-            model=model,
-            optimizer=optimizer,
-            criterion=criterion,
-            dataloader_train=dataloader_train,
-            dataloader_test=dataloader_test,
-            params=config["train_embedder"],
-            device=device,
-            code2label=code2label,
-            scheduler=scheduler,
-            scorer=scorer,
-            score_target=score_target,
-            optimizer_loss=optimizer_loss
-        )
+    score_best_folds.append(score_best)
 
-        score_best = trainer.train()
-
-        score_best_folds.append(score_best)
-
-        mlflow.end_run()
+    mlflow.end_run()
 
     score_mean = np.mean(score_best_folds)
 

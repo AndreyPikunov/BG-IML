@@ -19,11 +19,15 @@ class PaintingDataset(Dataset):
         folder_images: str,
         transform_train=None,
         transform_preprocess=None,
-        apply_one_hot=True
+        apply_one_hot=True,
+        remake_label_code=False
     ):
         self.ann = annotation.copy()
         self.folder_images = Path(folder_images)
         self.transform_train = transform_train
+
+        if remake_label_code:
+            self.ann["label_code"] = self.ann.label.astype("category").cat.codes
 
         self.images = []
         self.Y = []
