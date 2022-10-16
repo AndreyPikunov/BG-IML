@@ -1,27 +1,219 @@
-# Ideas
-- случайное разбиение сравнить с разбиением по художникам
-- выборка несбаллансирована
-- разные резнеты не сильно отличаются, беру самый маленький
-- тренируем resnet18 на softmax и triplet-loss
-- тренируем resnet18 на ComboLoss = softmax + triplet
-- emb_size = 3. если сделать мало, то можно рисовать без UMap. если сделать много, то проклятие размерности работает на нас.
-- для эмбедингов посчитать silhouette_score
-- top-3
-- baseline model
+# Report
 
-## train_combo
-Best:
-`run_id: 02d19b0502a84e18b4d45112770cde25`
-- classification_loss = 0.9, 0.98, 0.99, 0.999, 1. разный embedding_size
+## 0. Дизайн эксперимента.
+
+[`src/create_annotation.py`](src/create_annotation.py)
+
+[`src/create_design.py`](src/create_design.py)
+
+У меня есть ~1400 картин в 8 стилях. В названиях файлов некоторых стилей сохранились имена авторов (авторов нет у фотографий и мультиков). Я решил разбить датасет на части таким образом:
+- 5% отложенный валидационный датасет
+- оставшиеся 95% = 4 фолда для CV
+
+Я сделал так, что все (4 + 1) = 5 фолдов не имеют общих авторов. Это для того, чтобы снизить переобучение / data leak. Стиль одного автора может быть запоминающимся, а поэтому классификатор, тренирующийся на картинах этого автора, вероятно, сможет отгадать другие его картины в тестовой выборке. Разбивая по авторам, я старался делать так, чтобы во все фолды попало примерно одинаковое число авторов и одновременно с этим примерно одинаковое число картин.
+
+В отличие от 4 CV фолдов, валидационный датасет дополнительно усложнён -- я сделад в нём как можно больше авторов. Так, в него попало много авторов с всего одной картиной. Таблица с числом авторов и картин в каждом фолде:
+
+```
+              author                 filename                
+fold_author        0   1   2   3 val        0   1   2   3 val
+label                                                        
+artdeco            2   2   2   2   3       10  31  10  11   3
+cartoon            1   1   1   1   1       18  18  18  17   4
+cubism            17  17  17  16  18       81  89  85  92  18
+impressionism     23  23  23  22  11       58  50  61  60  11
+japonism           6   6   5   5   7       55  42  57  40   9
+naturalism         2   2   2   2   3       45  83  61  20   9
+photo              1   1   1   1   1       33  33  33  33   7
+rococo             5   5   4   4   5       20  21  47  24   5
+```
+
+Метрикой качества для всех задач классификации я избрал top 2 accuracy, которую взвешивал по классам. (Ещё много метрик я просто логгировал, но не опирался на них при выборе модели, см. [`src/scorers/ScorerCombo.py`](src/scorers/ScorerCombo.py)). Top 2 accuracy мне кажется более подходящей, чем обычная accuracy (top 1) или f1, потому что классы, на самом деле, не взаимоисключающие и отбрасывать модель за то, что она нашла пару правдаподобных классов вместо одного, я не хочу. Например, можно найти картину **ПРИМЕР**, на которой нарисованы животные яркими красками, широкими мазками. Это, наверное, частично и натурализм, и импрессионизм. Более того, сами стили в истории не возникали внезапно. У каждого художника есть что-то от "соседей". Впрочем, какие-то классы действительно сильно отличаются от всех остальных -- фото, например. Top 3 accuracy я не беру, потому что 3 это уже почти половина мои 8 классов.
+
+## 1. Классификация картин по стилям с помощью нейросети.
+
+### Архитектура
+
+![model-design](images/model-design.svg)
+
+[`src/models/models.py`](src/models/models.py)
+
+Я собрал нейросеть, как на картинке выше.
+1. Resnet генерирует признаки и отдаёт 1000-мерный вектор через ReLU в полносвязный слой. То, что вышло из этого слоя, я называю embedding, а всю конструцию, которая его создаёт -- Embedder.
+2. Embedding отправляется ещё через одну ReLU в последний полносвязный слой, который на выходе даёт logits для 8 классов.
+
+Я взял CrossEntropyLoss, как функцию ошибок для своей задачи.
+
+Картинки в трейне подвергались таким трансформациям:
+```python
+transform_resnet = resnet_weights.DEFAULT.transforms()
+transform_train = transforms.Compose(
+    [
+        transforms.RandomRotation(45),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.ColorJitter(
+            brightness=0.25, contrast=0.25, saturation=0.25, hue=0.0
+        ),
+        transforms.RandomErasing(p=0.5),
+        transform_resnet,
+    ]
+)
+```
+
+В тесте использовался только `transform_resnet`.
+
+### Оптимизация гимерпараметров
+[`src/optunize_nn_classifier.py`](src/optunize_nn_classifier.py)
+
+Гиперпараметры, которые я перебирал при обучении зафиксированы в [params.yaml](params.yaml), раздел `optunize_nn_classifier`. Главные из них:
+- Глубина ResNet. В моих экспериментах CV, качество было тем выше, чем глубже ResNet. Но выйгрыш был незначительным, например, median top 2 accuracy по 4 фолдам: `0.76` и `0.81` для ResNet18 и ResNet50, соответственно. Расчеты с очень глубокими моделями сильно растягиваются по времени (я считал всё на apple m1 pro), поэтому для всех дальнейших экспериментов я пользовался ResNet18.
+- Так же из CV я обнаружил, что стоит разморозить весь ResNet и обучать его вместе новыми с добавленными слоями.
+- Learning rate. Так как весь ResNet уже сидит в хорошем минимуме лосса, то темп обучения я делал изначально маленький плюс экспоненциально уменьшал его к концу расчета до `1e-5`.
+- Embedding size. Тут проклятие размерности нам на руку, потому что разнести классы в многомерном пространстве значительно легче, чем в маломерном.
+
+Ещё я подготовил для кручения label_smoothing и weight_decay, но так и не трогал их, хотя они могли бы улучшить генерализацию модели. Так же, стоило сделать два оптимизатора, которые работают одновременно. Один оптимизирует CNN (feature generator), другой -- линейные слои. Первый должен мелко шагать, а второй крупно.
+
+<!-- ![optuna-lr-score](images/optuna-lr-score.png)
+Самый первый прогон optuna для прощупывания гиперпараметров. Низкий learning rate даёт более высокий score. Эта картинка старая, в этих расчетах использовался f1-score, как целевая метрика. -->
+
+По итогам кроссвалидации я выбрал такие параметры:
+
+```yaml
+mlflow_run_id: ca8ff65afb5744a2bde060f116d70a22
+resnet_name: resnet18
+embedding_size: 16
+lr_start: 0.0001
+```
+
+На этих параметрах я обучил финальную модель, выбрав такое разбиение на train и test (из 4 уже приготовленных фолдов), которое давало лучшее качество.
+
+### Результаты обучения лучшей модели
+График loss и score.
+![learning-curves](images/learning-curves-ca8ff65afb5744a2bde060f116d70a22.png)
+
+Confusion matrix. Нормализована по строкам (на главной диагонали получается recall).
+![confmat](images/confmat-ca8ff65afb5744a2bde060f116d70a22.png)
+
+Classification report.
+```
+               precision    recall  f1-score   support
+
+      artdeco       0.30      0.70      0.42        10
+      cartoon       0.92      0.67      0.77        18
+       cubism       0.91      0.80      0.85        85
+impressionism       0.83      0.70      0.76        61
+     japonism       0.65      0.81      0.72        57
+   naturalism       0.71      0.64      0.67        61
+        photo       0.88      0.91      0.90        33
+       rococo       0.83      0.87      0.85        46
+
+     accuracy                           0.77       371
+    macro avg       0.75      0.76      0.74       371
+ weighted avg       0.79      0.77      0.78       371
+```
+
+#### artdeco
+У artdeco проблемы с precision. Если для "продуктовой" модели это будет критично, то нужно обучить отдельную модель, бинарный классификатор artdeco vs all. Для этой задачи стоит пересобрать выборку (проредить остальные классы), так как artdeco на порядок менее представлен. Можно выбрать более подходящую функцию ошибок, например, FocalLoss.
+
+#### naturalism
+Лучше artdeco, но всё равно плохо. Naturalism достаточно представлен в датасете. Проблема с ним в другом. Этот класс скорее не класс, а "атрибут" или "label" (multi-label task).
+
+#### photo
+Это чемпион: f1_score = 0.9. Здесь всё понятно, класс photo не является живописным.
+
+### Валидация
+В самом конце, я достаю val датасет и проверяю финальное качество -- top 2 accuracy = 0.8.
+За бейзлайн можно взять случайное угадывание -- оно даёт 0.25.
+```
+       precision  recall  fscore  top_1_accuracy  top_2_accuracy
+name                                                            
+train       0.96    0.96    0.96            0.97            0.99
+test        0.79    0.77    0.77            0.76            0.91
+val         0.63    0.62    0.61            0.63         -> 0.80
+```
+
+Интересно посмотреть на картины каждого класса, которые предсказались неверно. 
+
+Более того, интересно сделать occlusion для определения важных участков картин.
+
+## 2. Кластеризация эмбеддингов (выходы предпоследнего слоя).
+
+На картинке показана "эволюция" эмбеддингов. На 9 эпохе модель достигла лучшего качества.
+![embedding-evolution](images/embedding-evolution-ca8ff65afb5744a2bde060f116d70a22.png)
+
+Кластеризация с помощью и kNN, и AgglomerativeClustering дала максимальный silhouette score при числе кластеров равном числу классов (8). Следующая картинка получена на данных с лучшей эпохи:
+
+![embedding-best-epoch](images/embedding-clustering-ca8ff65afb5744a2bde060f116d70a22.png)
+
+Japonism, cartoon и photo сидят в своих отдалённых кластерах (artdeco едва соединяется с cubism).
+С cartoon и photo понятно -- это не картины.
+Japonism отделился, вероятно, потому что не является европейским живописным стилем.
+Остальные классы расположены интереснее.
+Я вижу путь от rococo через naturalism, impressionism и cubism к artdeco.
+Про naturalism я не уверен (он, кстати, на impressionism наполз), но остальные классы располагаются в хронологическом порядке (если сверяться с Википедией).
+
+*Заметка. Так же, в ходе экспериментов я заметил, что при увеличении learning rate на порядок такой красивой кластеризации не получается, хотя задача классификации решается примерно так же хорошо.*
+
+## 3. Metric learning
+
+[`src/train_embedder.py`](src/train_embedder.py)
+
+Metric learning хорошо подходит для open-set задач.
+В моём случае, финальная цель -- классифицировать уже сформированные, зафиксированные классы (closed-set).
+Впрочем, можно попробовать построить эмбединги с помощью metric learning на всех, кроме, скажем, пары классов.
+После обучения заэмбеддить отложенные классы и оценить результат.
+Отложил я классы photo и naturalism.
+
+Мой опыт подсказывает, что функции ошибки, работающие с углами через CosineSimilarity, проявляют себя лучше всего при построении эмбедингов.
+Я взял ArcFaceLoss, но даже на нём задача решалась плохо.
+В качестве метрики я использовал (как в предыдущем пункте про кластеризацию) silhouette score.
+Так я сделал, потому что это просто и быстро реализовать.
+
+Так как ArcFaceLoss работает с эмбеддингами на гиперсфере, я решил сделать эмбеддер в 3D, чтобы рисовать занимательные картинки.
+
+Нативное пространство: [click](images/arccos-native-60721c74bc834d52a53f486ff813d08c.html).
+
+Нормализованные векторы эмбеддингов (лежат на единичной сфере): [click](images/arccos-sphere-60721c74bc834d52a53f486ff813d08c.html).
+
+Отложенные классы размазались по всей поверхности сферы, хотя если их убрать, то видно, что модель хорошо научилась разносить оставшиеся классы из обучающей выборки.
+
+*Так же я сделал следующий эксперимент. Для первой задачи классификации я применил два лосса одновременно: TripletMarginLoss для эмбеддингов и CrossEntropy для logits. Это привело у ухудшению качества классификации. Результаты не показываю.*
+
+## 4. Обучение Random Forest на эмбеддингах.
+
+Полученный эмбеддинг я использовал, как признаки для обучения Random Forest (его я выбрал для простоты). Учил на такой же разбивке трейн/тест, как в пункте 1. Привлёк optuna для оптимизации гиперпараметров. Качество получается хуже, чем у нейросети.
+
+```
+    top_2_accuracy
+
+        NN      random_forest
+                                                         
+train   0.99    0.96
+test    0.91    0.86
+val     0.80    0.77
+```
+
+Это разумно, несмотря на то, что в нейросети остаётся только один линейный слой, который делает из эмбеддинга финальные logits. Разумно потому, что весь хвост из предыдущих слоёв учился сначала на ImageNet, потом на моём датасете, чтобы последний слой мог успешно вычислить logits. 
+
+Random Forest (и подобные ему) алгоритмы будут выигрывать в решении этой задачи в другом сценарии. Например, весь ResNet заморожен вместе со своим выходным полносвязным слоем, а учится только два линейных слоя в конце. В данном случае, Random Forest может дорасти до состояния, в котором он обгонит в качестве нейросеть.
+
+Остаётся вопрос, если у нас получилось 2 алгоритма:
+1. Нейросеть = Эмбеддер + голова
+2. Гибрил = Эмбеддер + Random Forest
+
+Какую комбинацию брать?
+
+Ответ зависит от цели (в конце концов, Random Forest может дать качество чуть лучше), но я бы использовал нейросеть.
+
+Во-первых, её предсказания лучше откалиброваны в смысле вероятности, особенно, если лучшая модель выбиралась не по метрике, а по лоссу. Если нас заинтересуют предсказанные вероятности классов, то Random Forest нужно будет дополнительно калибровать.
+
+https://dl.acm.org/doi/abs/10.1145/1102351.1102430
+https://arxiv.org/pdf/1706.04599.pdf
+ 
+Во-вторых, одна нейросеть выглядит элегантнее. (Особенно, если к Random Forest придётся добавить калибровщика).
 
 
-## Report
-
-<div>                        <script type="text/javascript">window.PlotlyConfig = {MathJaxConfig: 'local'};</script>
-        <script src="https://cdn.plot.ly/plotly-2.14.0.min.js"></script>                <div id="99747703-66fa-418b-8f1d-452e06de8047" class="plotly-graph-div" style="height:400px; width:700px;"></div>            <script type="text/javascript">                                    window.PLOTLYENV=window.PLOTLYENV || {};                                    if (document.getElementById("99747703-66fa-418b-8f1d-452e06de8047")) {                    Plotly.newPlot(                        "99747703-66fa-418b-8f1d-452e06de8047",                        [{"alignmentgroup":"True","boxpoints":"all","customdata":[[0.0035539307285643,2.0],[0.0035539307285643,1.0],[0.0035539307285643,0.0],[0.0020811514004183,3.0],[0.0020811514004183,2.0],[0.0020811514004183,1.0],[0.0020811514004183,0.0],[0.0041568855943022,3.0],[0.0041568855943022,2.0],[0.0041568855943022,1.0],[0.0041568855943022,0.0],[0.0058740366618128,3.0],[0.0058740366618128,2.0],[0.0058740366618128,1.0],[0.0058740366618128,0.0],[0.0462323747281437,3.0],[0.0462323747281437,2.0],[0.0462323747281437,1.0],[0.0462323747281437,0.0],[0.0180763431579012,3.0],[0.0180763431579012,2.0],[0.0180763431579012,1.0],[0.0180763431579012,0.0]],"hovertemplate":"retrain_type='fc'<br>model_name=%{x}<br>best_score_test=%{y}<br>lr=%{customdata[0]}<br>fold_index=%{customdata[1]}<extra></extra>","legendgroup":"'fc'","marker":{"color":"#636efa"},"name":"'fc'","notched":false,"offsetgroup":"'fc'","orientation":"v","showlegend":true,"x":["resnet34","resnet34","resnet34","resnet34","resnet34","resnet34","resnet34","resnet18","resnet18","resnet18","resnet18","resnet50","resnet50","resnet50","resnet50","resnet18","resnet18","resnet18","resnet18","resnet50","resnet50","resnet50","resnet50"],"x0":" ","xaxis":"x","y":[0.6493300986315352,0.6457593116024566,0.5666286340471123,0.7250498399703436,0.6305170492988756,0.6472702102295668,0.5477012925066791,0.6843091130282101,0.5983032114563175,0.6601352678371234,0.5186550390212755,0.737745159241262,0.6483361457052174,0.6735034759369706,0.5675449936209607,0.6403456453030026,0.5627082622593224,0.6065328820345853,0.4935803779557045,0.6931001641322392,0.6099354557310037,0.6433364516591075,0.5613450384601528],"y0":" ","yaxis":"y","type":"box"},{"alignmentgroup":"True","boxpoints":"all","customdata":[[0.0216625016527298,3.0],[0.0216625016527298,2.0],[0.0216625016527298,1.0],[0.0216625016527298,0.0],[0.0093884789983839,3.0],[0.0093884789983839,2.0],[0.0093884789983839,1.0],[0.0093884789983839,0.0],[0.0022648350299577,3.0],[0.0022648350299577,2.0],[0.0022648350299577,1.0],[0.0022648350299577,0.0]],"hovertemplate":"retrain_type='full'<br>model_name=%{x}<br>best_score_test=%{y}<br>lr=%{customdata[0]}<br>fold_index=%{customdata[1]}<extra></extra>","legendgroup":"'full'","marker":{"color":"#EF553B"},"name":"'full'","notched":false,"offsetgroup":"'full'","orientation":"v","showlegend":true,"x":["resnet50","resnet50","resnet50","resnet50","resnet50","resnet50","resnet50","resnet50","resnet18","resnet18","resnet18","resnet18"],"x0":" ","xaxis":"x","y":[0.6718280907804602,0.6392446585139718,0.6566315490168383,0.5479254809660733,0.7233166082672244,0.6434479102260203,0.7021921268089416,0.5676722498984025,0.6897797955067272,0.607552553190313,0.6782786632618443,0.541501779632032],"y0":" ","yaxis":"y","type":"box"}],                        {"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmapgl":[{"type":"heatmapgl","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermapbox":[{"type":"scattermapbox","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05},"mapbox":{"style":"light"}}},"xaxis":{"anchor":"y","domain":[0.0,1.0],"title":{"text":"model_name"},"categoryorder":"array","categoryarray":["resnet18","resnet34","resnet50"]},"yaxis":{"anchor":"x","domain":[0.0,1.0],"title":{"text":"best_score_test"}},"legend":{"title":{"text":"retrain_type"},"tracegroupgap":0},"margin":{"t":60},"boxmode":"group","height":400,"width":700},                        {"responsive": true}                    )                };                            </script>        </div>
-
-
-# Papers
+# Resources
 
 ## Models
 
@@ -33,14 +225,15 @@ https://www.sciencedirect.com/science/article/abs/pii/S0957417418304421
 ## Metric learning
 https://github.com/KevinMusgrave/pytorch-metric-learning
 https://arxiv.org/pdf/2003.11982.pdf
+https://discuss.pytorch.org/t/triplet-vs-cross-entropy-loss-for-multi-label-classification/4480
+https://arxiv.org/pdf/1902.09229.pdf
 
 ## XAI
-
 https://github.com/kazuto1011/grad-cam-pytorch
-
 https://github.com/marcoancona/DeepExplain
 https://github.com/albermax/innvestigate
 https://christophm.github.io/interpretable-ml-book/pixel-attribution.html#deconvnet
 
 ## Misc
 https://arxiv.org/pdf/1609.04836.pdf
+https://arxiv.org/pdf/1706.04599.pdf
