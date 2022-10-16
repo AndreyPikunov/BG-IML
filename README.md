@@ -28,7 +28,7 @@ photo              1   1   1   1   1       33  33  33  33   7
 rococo             5   5   4   4   5       20  21  47  24   5
 ```
 
-Метрикой качества для всех задач классификации я избрал top 2 accuracy, которую взвешивал по классам. (Ещё много метрик я просто логгировал, но не опирался на них при выборе модели, см. [`src/scorers/ScorerCombo.py`](src/scorers/ScorerCombo.py)). Top 2 accuracy мне кажется более подходящей, чем обычная accuracy (top 1) или f1, потому что классы, на самом деле, не взаимоисключающие и отбрасывать модель за то, что она нашла пару правдаподобных классов вместо одного, я не хочу. Например, можно найти картину **ПРИМЕР**, на которой нарисованы животные яркими красками, широкими мазками. Это, наверное, частично и натурализм, и импрессионизм. Более того, сами стили в истории не возникали внезапно. У каждого художника есть что-то от "соседей". Впрочем, какие-то классы действительно сильно отличаются от всех остальных -- фото, например. Top 3 accuracy я не беру, потому что 3 это уже почти половина моих 8 классов.
+Метрикой качества для всех задач классификации я избрал top 2 accuracy, которую взвешивал по классам. (Ещё много метрик я просто логгировал, но не опирался на них при выборе модели, см. [`src/scorers/ScorerCombo.py`](src/scorers/ScorerCombo.py)). Top 2 accuracy мне кажется более подходящей, чем обычная accuracy (top 1) или f1, потому что классы, на самом деле, не взаимоисключающие и отбрасывать модель за то, что она нашла пару правдаподобных классов вместо одного, я не хочу. Например, можно найти картину, на которой нарисованы животные яркими красками, широкими мазками. Это, наверное, частично и натурализм, и импрессионизм. Более того, сами стили в истории не возникали внезапно. У каждого художника есть что-то от "соседей". Впрочем, какие-то классы действительно сильно отличаются от всех остальных -- фото, например. Top 3 accuracy я не беру, потому что 3 это уже почти половина моих 8 классов.
 
 ## 1. Классификация картин по стилям с помощью нейросети.
 
@@ -129,9 +129,20 @@ test        0.79    0.77    0.77            0.76            0.91
 val         0.63    0.62    0.61            0.63         -> 0.80
 ```
 
-Интересно посмотреть на картины каждого класса, которые предсказались неверно. 
+### Примеры
 
-Более того, интересно сделать occlusion для определения важных участков картин.
+Top-1
+![examples-top-1](images/prediction-examples-top-1-ca8ff65afb5744a2bde060f116d70a22.png)
+
+Top-2
+![examples-top-2](images/prediction-examples-top-2-ca8ff65afb5744a2bde060f116d70a22.png)
+
+Wrong
+![examples-wrong](images/prediction-examples-wrong-ca8ff65afb5744a2bde060f116d70a22.png)
+
+### XAI?
+
+Интересно сделать occlusion для определения важных участков картин.
 
 ## 2. Кластеризация эмбеддингов (выходы предпоследнего слоя).
 
@@ -218,22 +229,35 @@ https://arxiv.org/pdf/1706.04599.pdf
 ## Models
 
 http://math.lakeforest.edu/banerji/research_files/WCVA16.pdf
+
 http://cs231n.stanford.edu/reports/2017/pdfs/410.pdf
+
 http://cs231n.stanford.edu/reports/2017/pdfs/406.pdf
+
 https://www.sciencedirect.com/science/article/abs/pii/S0957417418304421
 
 ## Metric learning
+
 https://github.com/KevinMusgrave/pytorch-metric-learning
+
 https://arxiv.org/pdf/2003.11982.pdf
+
 https://discuss.pytorch.org/t/triplet-vs-cross-entropy-loss-for-multi-label-classification/4480
+
 https://arxiv.org/pdf/1902.09229.pdf
 
 ## XAI
+
 https://github.com/kazuto1011/grad-cam-pytorch
+
 https://github.com/marcoancona/DeepExplain
+
 https://github.com/albermax/innvestigate
+
 https://christophm.github.io/interpretable-ml-book/pixel-attribution.html#deconvnet
 
 ## Misc
+
 https://arxiv.org/pdf/1609.04836.pdf
+
 https://arxiv.org/pdf/1706.04599.pdf
