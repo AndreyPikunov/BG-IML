@@ -6,9 +6,6 @@ import numpy as np
 import mlflow
 import optuna
 
-import sys
-
-sys.path.append("../src")
 from train_nn_classifier import main as run_experiment
 from utils import load_config, get_abs_dirname
 
@@ -22,39 +19,44 @@ class Objective:
         config = self.config
 
         resnet_name = trial.suggest_categorical(
-            "resnet_name",
-            config["optunize_nn_classifier"]["resnet_name_list"]
+            "resnet_name", config["optunize_nn_classifier"]["resnet_name_list"]
         )
         config["train_nn_classifier"]["resnet_name"] = resnet_name
 
         freeze_resnet_cnn = trial.suggest_categorical(
             "freeze_resnet_cnn",
-           config["optunize_nn_classifier"]["freeze_resnet_cnn_list"]
+            config["optunize_nn_classifier"]["freeze_resnet_cnn_list"],
         )
-        config["train_nn_classifier"]["params_embedder"]["freeze_resnet_cnn"] = freeze_resnet_cnn
+        config["train_nn_classifier"]["params_embedder"][
+            "freeze_resnet_cnn"
+        ] = freeze_resnet_cnn
 
         if freeze_resnet_cnn:
             freeze_resnet_fc = trial.suggest_categorical(
                 "freeze_resnet_fc",
-            config["optunize_nn_classifier"]["freeze_resnet_fc_list"]
+                config["optunize_nn_classifier"]["freeze_resnet_fc_list"],
             )
         else:
             freeze_resnet_fc = True
-        config["train_nn_classifier"]["params_embedder"]["freeze_resnet_fc"] = freeze_resnet_fc
+        config["train_nn_classifier"]["params_embedder"][
+            "freeze_resnet_fc"
+        ] = freeze_resnet_fc
 
         embedding_size = trial.suggest_int(
             "embedding_size",
             config["optunize_nn_classifier"]["embedding_size"]["min"],
-            config["optunize_nn_classifier"]["embedding_size"]["max"], 
-            log=True
+            config["optunize_nn_classifier"]["embedding_size"]["max"],
+            log=True,
         )
-        config["train_nn_classifier"]["params_embedder"]["embedding_size"] = embedding_size
+        config["train_nn_classifier"]["params_embedder"][
+            "embedding_size"
+        ] = embedding_size
 
         lr = trial.suggest_float(
             "lr",
             config["optunize_nn_classifier"]["lr"]["min"],
-            config["optunize_nn_classifier"]["lr"]["max"], 
-            log=True
+            config["optunize_nn_classifier"]["lr"]["max"],
+            log=True,
         )
         config["train_nn_classifier"]["optimizer"]["lr"] = lr
 
@@ -90,7 +92,9 @@ if __name__ == "__main__":
     mlflow_tracking_uri = config["shared"]["mlflow_tracking_uri"]
     mlflow.set_tracking_uri(mlflow_tracking_uri)
 
-    mlflow_experiment = config["train_nn_classifier"].get("mlflow_experiment", "train_nn_classifier")
+    mlflow_experiment = config["train_nn_classifier"].get(
+        "mlflow_experiment", "train_nn_classifier"
+    )
     mlflow.set_experiment(mlflow_experiment)
 
     main(config)

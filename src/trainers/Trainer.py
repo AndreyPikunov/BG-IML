@@ -24,7 +24,7 @@ class Trainer:
         score_target,
         params,
         code2label,
-        device
+        device,
     ):
 
         self.device = device
@@ -89,7 +89,7 @@ class Trainer:
             self.model.eval()
 
         loss = np.mean(loss_batches)
-      
+
         self.embeddings[step_name] = torch.concat(embeddings)
         self.trues[step_name] = torch.concat(trues)
         self.preds[step_name] = torch.concat(preds)
@@ -97,7 +97,7 @@ class Trainer:
         scores = self.scorer(
             pred=self.preds[step_name],
             true=self.trues[step_name],
-            embedding=self.embeddings[step_name]
+            embedding=self.embeddings[step_name],
         )
 
         return loss, scores

@@ -46,19 +46,18 @@ class ScorerCombo:
         sample_weight = [class_weight[i] for i in true]
 
         for k in self.top_k_list:
-            acc = top_k_accuracy_score(true, pred_scores, k=k, sample_weight=sample_weight, labels=self.codes)
+            acc = top_k_accuracy_score(
+                true, pred_scores, k=k, sample_weight=sample_weight, labels=self.codes
+            )
             scores_classification[f"top_{k}_accuracy"] = acc
 
         scores_clustering = {
-
             "silhouette_pred": silhouette_score(X, pred),
             "davies_bouldin_pred": davies_bouldin_score(X, pred),
             "calinski_harabasz_pred": calinski_harabasz_score(X, pred),
-
             "silhouette_true": silhouette_score(X, true),
             "davies_bouldin_true": davies_bouldin_score(X, true),
             "calinski_harabasz_true": calinski_harabasz_score(X, true),
-
         }
 
         result = {**scores_classification, **scores_clustering}

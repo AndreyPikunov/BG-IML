@@ -210,7 +210,9 @@ if __name__ == "__main__":
     mlflow_tracking_uri = config["shared"]["mlflow_tracking_uri"]
     mlflow.set_tracking_uri(mlflow_tracking_uri)
 
-    mlflow_experiment = config["train_nn_classifier"].get("mlflow_experiment", "train_nn_classifier")
+    mlflow_experiment = config["train_nn_classifier"].get(
+        "mlflow_experiment", "train_nn_classifier"
+    )
     mlflow.set_experiment(mlflow_experiment)
 
     main(config)

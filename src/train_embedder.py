@@ -88,7 +88,7 @@ def main(config):
         folder_images,
         transform_train=transform_train,
         apply_one_hot=False,
-        remake_label_code=True
+        remake_label_code=True,
     )
 
     dataset_test = PaintingDataset(
@@ -96,12 +96,10 @@ def main(config):
         folder_images,
         transform_preprocess=transform_resnet,
         apply_one_hot=False,
-        remake_label_code=True
+        remake_label_code=True,
     )
 
-    dataloader_train = DataLoader(
-        dataset_train, batch_size=batch_size, shuffle=True
-    )
+    dataloader_train = DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
     dataloader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=False)
 
     n_classes = len(dataset_train.ann.label.unique())
@@ -162,11 +160,13 @@ def main(config):
     lr = config["train_embedder"]["optimizer_loss"]["lr"]
     optimizer_loss = torch.optim.Adam(criterion.parameters(), lr=lr)
 
-    mlflow.log_params({
-        "criterion": "ArcFaceLoss",
-        "use_class_weight": True,
-        "lr_loss": lr,
-    })
+    mlflow.log_params(
+        {
+            "criterion": "ArcFaceLoss",
+            "use_class_weight": True,
+            "lr_loss": lr,
+        }
+    )
 
     scorer = Scorer()
     score_target = config["train_embedder"]["score_target"]
@@ -185,7 +185,7 @@ def main(config):
         code2label_test=code2label_dict["test"],
         scheduler=scheduler,
         scorer=scorer,
-        score_target=score_target
+        score_target=score_target,
     )
 
     score_best = trainer.train()
@@ -220,7 +220,9 @@ if __name__ == "__main__":
     mlflow_tracking_uri = config["shared"]["mlflow_tracking_uri"]
     mlflow.set_tracking_uri(mlflow_tracking_uri)
 
-    mlflow_experiment = config["train_embedder"].get("mlflow_experiment", "train_embedder")
+    mlflow_experiment = config["train_embedder"].get(
+        "mlflow_experiment", "train_embedder"
+    )
     mlflow.set_experiment(mlflow_experiment)
 
     main(config)
