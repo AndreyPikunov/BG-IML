@@ -172,7 +172,7 @@ class Trainer:
                 if is_best:
                     score_test_best = score_test
 
-                    mlflow.log_metric("score_test_best", step=epoch)
+                    mlflow.log_metric("score_test_best", score_test_best, step=epoch)
 
                     if save_model_checkpoints:
                         self.dump_model()

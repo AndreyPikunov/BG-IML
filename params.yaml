@@ -15,38 +15,6 @@ design:
   val_size: 0.05
 
 
-optunize_random_forest:
-
-  filename_input: "./data/predictions/combo.csv"
-
-  n_trials: 100
-
-  column_fold: fold_author
-
-  folds_use:
-  - 3
-
-  hyperparams:
-    n_estimators:
-      min: 10
-      max: 1000
-    max_depth: 
-      min: 2
-      max: 32
-    min_samples_leaf:
-      min: 1
-      max: 32
-    min_samples_split:
-      min: 2
-      max: 32
-
-  use_pca:
-    - true
-    - false
-
-  mlflow_experiment: optunize_random_forest
-
-
 train_nn_classifier:
   filename_design: data/design.csv
   folder_images: data/raw/images
@@ -63,7 +31,7 @@ train_nn_classifier:
   #   - cubism
 
   params_embedder:
-    resnet_name: resnet18
+    resnet_name: resnet50
     embedding_size: 16
     freeze_resnet_cnn: false
     freeze_resnet_fc: false
@@ -121,10 +89,8 @@ predict_nn_classifier:
   mlflow:
     experiment_name: train_nn_classifier
     run_id: ca8ff65afb5744a2bde060f116d70a22
-  device:
-    "mps"  
-  folder_output:
-    data/predictions
+  device: mps
+  folder_output: data/predictions
 
 
 train_embedder:
@@ -162,3 +128,37 @@ train_embedder:
   save_model_checkpoints: false
   mlflow_experiment: train_embedder
   device: mps
+
+
+
+optunize_random_forest:
+
+  filename_input: data/predictions/train_nn_classifier/ca8ff65afb5744a2bde060f116d70a22/predictions.csv
+  folder_output: models/random_forest
+
+  n_trials: 100
+
+  column_fold: fold_author
+
+  folds_use:
+  - 2
+
+  hyperparams:
+    n_estimators:
+      min: 10
+      max: 1000
+    max_depth: 
+      min: 2
+      max: 32
+    min_samples_leaf:
+      min: 1
+      max: 32
+    min_samples_split:
+      min: 2
+      max: 32
+
+  use_pca:
+    - true
+    - false
+
+  mlflow_experiment: optunize_random_forest

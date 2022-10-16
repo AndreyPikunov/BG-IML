@@ -9,12 +9,16 @@ import mlflow
 import optuna
 
 from sklearn.ensemble import RandomForestClassifier
+
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.pipeline import make_pipeline
-from sklearn.metrics import top_k_accuracy_score
-import sys
 
+from sklearn.metrics import top_k_accuracy_score
+
+from joblib import dump
+
+import sys
 sys.path.append("../src")
 from utils import load_config, get_abs_dirname
 
@@ -35,17 +39,17 @@ class Objective:
         df = pd.read_csv(filename_input)
 
         columns_features = [c for c in df.columns if c.startswith("emb")]
-        # columns_features = [c for c in df.columns if c.startswith("label_code")]
 
         X = df[columns_features].copy()
         y = df["label_code"]
 
-        column_fold = config["train_combo"]["column_fold"]
+        column_fold = config["optunize_random_forest"]["column_fold"]
         folds_use = config["optunize_random_forest"].get("folds_use")
         if folds_use is None:
             folds_use = df[column_fold].unique()
 
         params = self.suggest_forest_params(trial)
+        
         params["class_weight"] = "balanced"
 
         criterion = trial.suggest_categorical("criterion", ["gini", "log_loss"])
@@ -58,10 +62,10 @@ class Objective:
         params["max_features"] = max_features
 
         # use_pca = trial.suggest_categorical("use_pca", [True, False])
-        steps = [StandardScaler()]
+        # steps = [StandardScaler()]
         # if use_pca:
-            # steps.append(PCA())
-        preprocessor = make_pipeline(*steps)
+        #     steps.append(PCA())
+        # preprocessor = make_pipeline(*steps)
 
         fold_scores = []
 
@@ -85,12 +89,21 @@ class Objective:
 
             clf = RandomForestClassifier(**params)
             mlflow.log_params(params)
+
             # mlflow.log_param("use_pca", use_pca)
 
             # X_train = preprocessor.fit_transform(X_train)
             # X_test = preprocessor.transform(X_test)
 
             clf.fit(X_train, y_train)
+
+            folder_output = config["optunize_random_forest"]["folder_output"]
+            os.makedirs(folder_output, exist_ok=True)
+
+            filename_save = os.path.join(folder_output, "model.joblib")
+            dump(clf, filename_save)
+
+            mlflow.log_artifact(filename_save)
 
             for name, X_name, y_name in (
                 ("train", X_train, y_train),
