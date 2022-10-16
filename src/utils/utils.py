@@ -41,5 +41,7 @@ def load_resnet(model_name):
             resnet101 as resnet,
             ResNet101_Weights as resnet_weights,
         )
+    else:
+        raise RuntimeError()
 
     return resnet, resnet_weights

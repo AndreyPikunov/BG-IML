@@ -34,7 +34,7 @@ def main(config):
             )
             ann.loc[indices_val, "fold_author"] = "val"
 
-            msg = "label\n"
+            msg = label + "\n"
 
             p = len(indices_val) / len(authors.index)
             msg = msg + f"no autors: {p:.2f} %"
@@ -58,7 +58,7 @@ def main(config):
 
             ann.loc[mask_label & ann.author.isin(authors_val), "fold_author"] = "val"
 
-            msg = "label\n"
+            msg = label + "\n"
 
             n_authors_val = len(authors_val)
             n_authors = len(authors.unique())
@@ -72,11 +72,11 @@ def main(config):
             best_std = 100
             n_trials = 100
 
-            for _ in range(n_trials):
+            for i_trial in range(n_trials):
 
                 test_sizes = []
 
-                shuffler = ShuffleSplit(kfold_splits)
+                shuffler = KFold(kfold_splits, random_state=i_trial, shuffle=True)
 
                 for i, (indices_train, indices_test) in enumerate(
                     shuffler.split(authors_train_test)
@@ -88,7 +88,7 @@ def main(config):
 
                 std = np.std(test_sizes)
                 if std < best_std:
-                    msg = f"new best: {std} {test_sizes}"
+                    msg = f"new best: {std} {test_sizes} {sum(test_sizes)}"
                     logging.info(msg)
                     best_std = std
                     best_split = ann.loc[mask_label, "fold_author"].copy()

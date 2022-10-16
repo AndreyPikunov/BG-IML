@@ -1,4 +1,5 @@
 import os
+import logging
 
 import torch
 import numpy as np
@@ -10,12 +11,11 @@ from umap import UMAP
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 
-
-class Trainer:
+class TrainerEmbedder:
     def __init__(
         self,
         model,
-        optimizer,
+        optimizers,
         scheduler,
         dataloader_train,
         dataloader_test,
@@ -23,14 +23,15 @@ class Trainer:
         scorer,
         score_target,
         params,
-        code2label,
+        code2label_train,
+        code2label_test,
         device
     ):
 
         self.device = device
         self.model = model.to(device)
 
-        self.optimizer = optimizer
+        self.optimizers = optimizers
         self.criterion = criterion
 
         self.dataloader = {"train": dataloader_train, "test": dataloader_test}
@@ -39,9 +40,8 @@ class Trainer:
 
         self.embeddings = {"train": None, "test": None}
         self.trues = {"train": None, "test": None}
-        self.preds = {"train": None, "test": None}
 
-        self.code2label = code2label
+        self.code2label = {"train": code2label_train, "test": code2label_test}
         self.scheduler = scheduler
         self.scorer = scorer
         self.score_target = score_target
@@ -51,54 +51,56 @@ class Trainer:
         step_name = "train" if train else "test"
 
         device = self.device
-
         dataloader = self.dataloader[step_name]
 
         loss_batches = []
 
         embeddings = []
         trues = []
-        preds = []
 
         if train:
             self.model.train()
 
         for x, y in dataloader:
 
+            # y = y.to(device)
             x = x.to(device)
-            y = y.to(device)
-
-            pred, embedding = self.model(x)
+            embedding = self.model(x)
 
             if train:
-                self.optimizer.zero_grad()
+                
+                for opt in self.optimizers:
+                    opt.zero_grad()
 
-            loss = self.criterion(pred, y)
+                msg = f"{x.shape} {y.shape} {embedding.shape}"
+                logging.debug(msg)
 
-            if train:
+                loss = self.criterion(embedding, y)
                 loss.backward()
-                self.optimizer.step()
+
+                for opt in self.optimizers:
+                    opt.step()
+
+                loss_batches.append(loss.item())
 
             embeddings.append(embedding.detach())
             trues.append(y.detach())
-            preds.append(pred.detach())
-
-            loss_batches.append(loss.item())
 
         if train:
             self.model.eval()
 
-        loss = np.mean(loss_batches)
+        loss = np.mean(loss_batches) if train else 0.
       
         self.embeddings[step_name] = torch.concat(embeddings)
         self.trues[step_name] = torch.concat(trues)
-        self.preds[step_name] = torch.concat(preds)
 
-        scores = self.scorer(
-            pred=self.preds[step_name],
-            true=self.trues[step_name],
-            embedding=self.embeddings[step_name]
-        )
+        if self.scorer:
+            scores = self.scorer(
+                self.embeddings[step_name],
+                self.trues[step_name],
+            )
+        else:
+            scores = {}
 
         return loss, scores
 
@@ -142,8 +144,9 @@ class Trainer:
 
                 objectives = self.train_epoch()
 
-                lr = self.optimizer.param_groups[0]["lr"]
-                mlflow.log_metric("lr", lr, step=epoch)
+                for i, opt in enumerate(self.optimizers):
+                    lr = opt.param_groups[0]["lr"]
+                    mlflow.log_metric(f"lr-{i}", lr, step=epoch)
 
                 if self.scheduler is not None:
                     self.scheduler.step()
@@ -162,17 +165,14 @@ class Trainer:
                 filename = f"predictions/data-{epoch:03d}.csv"
                 mlflow.log_text(df.to_csv(), filename)
 
-                for color in "label_true", "label_pred":
-                    fig = self.plot_embeddings(df, color)
-                    filename = f"figures/embeddings-{color}-{epoch:03d}.html"
-                    mlflow.log_figure(fig, filename)
+                fig = self.plot_embeddings(df)
+                filename = f"figures/embeddings-{epoch:03d}.html"
+                mlflow.log_figure(fig, filename)
 
                 is_best = score_test > score_test_best
 
                 if is_best:
                     score_test_best = score_test
-
-                    mlflow.log_metric("score_test_best", score_test_best, step=epoch)
 
                     if save_model_checkpoints:
                         self.dump_model()
@@ -195,9 +195,15 @@ class Trainer:
         torch.save(model.state_dict(), filename_save_model_st)
         mlflow.log_artifact(filename_save_model_st)
 
-        filename_save_optimizer_st = os.path.join(folder_output_model, "optimizer.st")
-        torch.save(self.optimizer.state_dict(), filename_save_optimizer_st)
-        mlflow.log_artifact(filename_save_optimizer_st)
+        for i, opt in enumerate(self.optimizers):
+            filename_save_optimizer_st = os.path.join(folder_output_model, f"optimizer-{i}.st")
+            torch.save(opt.state_dict(), filename_save_optimizer_st)
+            mlflow.log_artifact(filename_save_optimizer_st)
+
+        # filename_save_model_pt = os.path.join(folder_output_model, "model.pt")
+        # model_scripted = torch.jit.script(model)
+        # model_scripted.save(filename_save_model_pt)
+        # mlflow.log_artifact(filename_save_model_pt)
 
         model = model.to(self.device)
 
@@ -205,48 +211,29 @@ class Trainer:
 
         emb_train = self.embeddings["train"]
         emb_test = self.embeddings["test"]
-        emb = torch.concat([emb_train, emb_test]).cpu().numpy()
+        data = torch.concat([emb_train, emb_test]).cpu().numpy()
 
-        columns = [f"emb_{i:03d}" for i in range(emb.shape[1])]
-        df = pd.DataFrame(emb, columns=columns)
+        df = pd.DataFrame(data)
 
-        n_train = len(emb_train)
+        true_train = [self.code2label["train"][i.item()] for i in self.trues["train"]]
+        true_test = [self.code2label["test"][i.item()] for i in self.trues["test"]]
+        true = true_train + true_test
+        df["true"] = true
+
+        n_train = len(true_train)
         df["fold"] = "test"
-        df.loc[:n_train, "fold"] = "train"
+        df.iloc[:n_train, "fold"] = "train"
 
-        true_train = self.trues["train"]
-        true_test = self.trues["test"]
-        true = torch.concat([true_train, true_test]).cpu()
-
-        pred_train = self.preds["train"]
-        pred_test = self.preds["test"]
-        pred = torch.concat([pred_train, pred_test]).cpu()
-
-        proba_pred = torch.nn.functional.softmax(pred, dim=1)
-        proba_true = true
-
-        for i, label in self.code2label.iteritems():
-            key = f"proba_pred_{label}"
-            df[key] = proba_pred[:, i]
-            key = f"proba_true_{label}"
-            df[key] = proba_true[:, i]
-
-        df["label_code_pred"] = pred.argmax(dim=1)
-        df["label_code_true"] = true.argmax(dim=1)
-
-        df["label_pred"] = df["label_code_pred"].replace(self.code2label)
-        df["label_true"] = df["label_code_true"].replace(self.code2label)
-
-        df.sort_values("label_true", inplace=True)
+        df.sort_values("true", inplace=True)
 
         return df
 
     def update_plot_columns(self, df):
 
-        columns = [c for c in df.columns if c.startswith("emb")]
-        X = df[columns].values
+        columns_drop = ["true", "fold"]
+        X = df.drop(columns=columns_drop).values
 
-        n_dims = len(columns)
+        n_dims = X.shape[-1]
 
         if n_dims > 3:
             reducer = UMAP(n_components=3, random_state=42)
@@ -261,12 +248,11 @@ class Trainer:
                 letter = "xyz"[i]
                 df[letter] = X[:, i]
 
-    def plot_embeddings(self, df, color="label_true"):
+    def plot_embeddings(self, df):
 
         args = dict(
-            color=color,
+            color="true",
             symbol="fold",
-            category_orders={color: self.code2label.values},
             width=800,
             height=600,
         )

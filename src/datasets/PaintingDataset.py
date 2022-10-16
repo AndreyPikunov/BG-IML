@@ -19,10 +19,15 @@ class PaintingDataset(Dataset):
         folder_images: str,
         transform_train=None,
         transform_preprocess=None,
+        apply_one_hot=True,
+        remake_label_code=False
     ):
         self.ann = annotation.copy()
         self.folder_images = Path(folder_images)
         self.transform_train = transform_train
+
+        if remake_label_code:
+            self.ann["label_code"] = self.ann.label.astype("category").cat.codes
 
         self.images = []
         self.Y = []
@@ -43,7 +48,11 @@ class PaintingDataset(Dataset):
             self.Y.append(label_code)
             self.labels.append(label)
 
-        self.Y = one_hot(torch.tensor(self.Y)).float()
+        self.Y = torch.tensor(self.Y)
+        
+        if apply_one_hot:
+            self.Y = one_hot(self.Y).float()
+
         self.N = len(self.Y)
 
     def __len__(self):

@@ -27,7 +27,7 @@ class ScorerCombo:
 
     def __call__(self, pred, true, embedding):
 
-        class_weight = true.mean(axis=0).cpu().numpy()
+        class_weight = 1 / true.mean(axis=0).cpu().numpy()
         pred_scores = self.numpify(pred)
         pred = self.prepare_y(pred)
         true = self.prepare_y(true)

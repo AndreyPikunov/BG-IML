@@ -7,7 +7,7 @@ import os
 import torch
 import mlflow
 
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 
 import sys
 
@@ -50,26 +50,26 @@ def main(config):
 
     artifact_storage = get_artifact_storage(
         config["shared"]["mlflow_tracking_uri"],
-        config["predict_combo_model"]["mlflow"]["experiment_name"],
-        config["predict_combo_model"]["mlflow"]["run_id"],
+        config["predict_nn_classifier"]["mlflow"]["experiment_name"],
+        config["predict_nn_classifier"]["mlflow"]["run_id"],
     )
 
     artifact_uri = os.path.join(artifact_storage, "config-runtime.yaml")
     config_restored = download_artifact_yaml(artifact_uri)
 
-    model_name = config_restored["train_combo"]["model_name"]
-    _, resnet_weights = load_resnet(model_name)
+    resnet_name = config_restored["train_nn_classifier"]["params_embedder"]["resnet_name"]
+    _, resnet_weights = load_resnet(resnet_name)
     transform_resnet = resnet_weights.DEFAULT.transforms()
 
     filename_ann = os.path.join(
         config_restored["shared"]["project_root"],
-        config_restored["train_combo"]["filename_design"],
+        config_restored["train_nn_classifier"]["filename_design"],
     )
     ann = pd.read_csv(filename_ann)
 
     folder_images = os.path.join(
         config_restored["shared"]["project_root"],
-        config_restored["train_combo"]["folder_images"],
+        config_restored["train_nn_classifier"]["folder_images"],
     )
 
     dataset = PaintingDataset(ann, folder_images, transform_preprocess=transform_resnet)
@@ -80,14 +80,16 @@ def main(config):
     artifact_uri = os.path.join(artifact_storage, "model.st")
     filename_model_st = mlflow.artifacts.download_artifacts(artifact_uri)
 
-    embedding_size = config_restored["train_combo"]["embedding_size"]
     n_classes = len(code2label)
 
-    model = NNClassifier(model_name, embedding_size, n_classes)
+    model = NNClassifier(
+        n_classes,
+        config_restored["train_nn_classifier"]["params_embedder"]
+    )
     model.load_state_dict(torch.load(filename_model_st))
     model.eval()
 
-    device = torch.device(config["predict_combo_model"]["device"])
+    device = torch.device(config["predict_nn_classifier"]["device"])
     model = model.to(device)
 
     Y_pred, Y_true, Z = predict(model, dataset, device)
@@ -111,7 +113,18 @@ def main(config):
     df["label_pred"] = df["label_code_pred"].replace(code2label)
     df["label_true"] = df["label_code_true"].replace(code2label)
 
-    filename_output = config["predict_combo_model"]["filename_output"]
+    folder_output = os.path.join(
+        config["predict_nn_classifier"]["folder_output"],
+        config["predict_nn_classifier"]["mlflow"]["experiment_name"],
+        config["predict_nn_classifier"]["mlflow"]["run_id"]
+    )
+    os.makedirs(folder_output, exist_ok=True)
+
+    filename_output = os.path.join(
+        folder_output,
+        "predictions.csv"
+    )
+
     df.to_csv(filename_output, index=False)
 
 
