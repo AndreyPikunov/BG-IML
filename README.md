@@ -138,9 +138,11 @@ val         0.63    0.62    0.61            0.63         -> 0.80
 В белом прямоугольнике -- top-3 предсказанных класса и их вероятности в процентах.
 
 #### Top-1
+
 ![examples-top-1](images/prediction-examples-top-1-ca8ff65afb5744a2bde060f116d70a22.png)
 
 #### Top-2
+
 ![examples-top-2](images/prediction-examples-top-2-ca8ff65afb5744a2bde060f116d70a22.png)
 
 Объясню часть примеров, потому что top 2 accuracy это как раз моя целевая метрика.
@@ -172,14 +174,25 @@ val         0.63    0.62    0.61            0.63         -> 0.80
 
 И так далее...
 
+
+#### Occlusion maps for top-2
+
+Я хотел воспользоваться [Captum](https://captum.ai/tutorials/Resnet_TorchVision_Interpret), но он у меня не заработал.
+Поэтому я написал самый простой метод сам -- occlusion.
+В подписи я оставил только top-1 и top-2 их вероятностями.
+Последняя строка -- occlusion amplitude -- показывает, насколько меняется вероятность истинного класса (модуль), если закрывать некоторые части изображения.
+Цвета значат следующее.
+Синий -- если удалить квадрат (занулить кусок изображения), то вероятность истинного класса уменьшится.
+Красный -- наоборот.
+
+![occlusion-top-2](images/occlusion-top-2-ca8ff65afb5744a2bde060f116d70a22.png)
+
+
 #### Картины с предсказанными классами не в top-2
+
 ![examples-wrong](images/prediction-examples-wrong-ca8ff65afb5744a2bde060f116d70a22.png)
 
 Интересно, что третий класс на всех этих картинках и есть загаданный.
-
-### XAI?
-
-Интересно сделать occlusion для определения важных участков картин.
 
 ## 2. Кластеризация эмбеддингов (выходы предпоследнего слоя).
 
@@ -295,6 +308,8 @@ https://github.com/marcoancona/DeepExplain
 https://github.com/albermax/innvestigate
 
 https://christophm.github.io/interpretable-ml-book/pixel-attribution.html#deconvnet
+
+https://captum.ai/tutorials/Resnet_TorchVision_Interpret
 
 ## Misc
 
