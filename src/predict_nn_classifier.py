@@ -9,10 +9,6 @@ import mlflow
 
 from tqdm import tqdm
 
-import sys
-
-sys.path.append("../src")
-
 from datasets import PaintingDataset
 from utils import load_config, get_abs_dirname, load_resnet
 from utils.mlflow import get_artifact_storage, download_artifact_yaml
@@ -57,7 +53,9 @@ def main(config):
     artifact_uri = os.path.join(artifact_storage, "config-runtime.yaml")
     config_restored = download_artifact_yaml(artifact_uri)
 
-    resnet_name = config_restored["train_nn_classifier"]["params_embedder"]["resnet_name"]
+    resnet_name = config_restored["train_nn_classifier"]["params_embedder"][
+        "resnet_name"
+    ]
     _, resnet_weights = load_resnet(resnet_name)
     transform_resnet = resnet_weights.DEFAULT.transforms()
 
@@ -83,8 +81,7 @@ def main(config):
     n_classes = len(code2label)
 
     model = NNClassifier(
-        n_classes,
-        config_restored["train_nn_classifier"]["params_embedder"]
+        n_classes, config_restored["train_nn_classifier"]["params_embedder"]
     )
     model.load_state_dict(torch.load(filename_model_st))
     model.eval()
@@ -116,14 +113,11 @@ def main(config):
     folder_output = os.path.join(
         config["predict_nn_classifier"]["folder_output"],
         config["predict_nn_classifier"]["mlflow"]["experiment_name"],
-        config["predict_nn_classifier"]["mlflow"]["run_id"]
+        config["predict_nn_classifier"]["mlflow"]["run_id"],
     )
     os.makedirs(folder_output, exist_ok=True)
 
-    filename_output = os.path.join(
-        folder_output,
-        "predictions.csv"
-    )
+    filename_output = os.path.join(folder_output, "predictions.csv")
 
     df.to_csv(filename_output, index=False)
 

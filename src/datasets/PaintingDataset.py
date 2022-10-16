@@ -20,7 +20,7 @@ class PaintingDataset(Dataset):
         transform_train=None,
         transform_preprocess=None,
         apply_one_hot=True,
-        remake_label_code=False
+        remake_label_code=False,
     ):
         self.ann = annotation.copy()
         self.folder_images = Path(folder_images)
@@ -49,7 +49,7 @@ class PaintingDataset(Dataset):
             self.labels.append(label)
 
         self.Y = torch.tensor(self.Y)
-        
+
         if apply_one_hot:
             self.Y = one_hot(self.Y).float()
 

@@ -1,3 +1,1 @@
 from datasets.PaintingDataset import PaintingDataset
-from datasets.PaintingDatasetTriplet import PaintingDatasetTriplet
-from datasets.PaintingDatasetCombo import PaintingDatasetCombo

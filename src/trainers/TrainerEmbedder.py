@@ -11,6 +11,7 @@ from umap import UMAP
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 
+
 class TrainerEmbedder:
     def __init__(
         self,
@@ -25,7 +26,7 @@ class TrainerEmbedder:
         params,
         code2label_train,
         code2label_test,
-        device
+        device,
     ):
 
         self.device = device
@@ -68,7 +69,7 @@ class TrainerEmbedder:
             embedding = self.model(x)
 
             if train:
-                
+
                 for opt in self.optimizers:
                     opt.zero_grad()
 
@@ -89,8 +90,8 @@ class TrainerEmbedder:
         if train:
             self.model.eval()
 
-        loss = np.mean(loss_batches) if train else 0.
-      
+        loss = np.mean(loss_batches) if train else 0.0
+
         self.embeddings[step_name] = torch.concat(embeddings)
         self.trues[step_name] = torch.concat(trues)
 
@@ -196,7 +197,9 @@ class TrainerEmbedder:
         mlflow.log_artifact(filename_save_model_st)
 
         for i, opt in enumerate(self.optimizers):
-            filename_save_optimizer_st = os.path.join(folder_output_model, f"optimizer-{i}.st")
+            filename_save_optimizer_st = os.path.join(
+                folder_output_model, f"optimizer-{i}.st"
+            )
             torch.save(opt.state_dict(), filename_save_optimizer_st)
             mlflow.log_artifact(filename_save_optimizer_st)
 
