@@ -1,18 +1,21 @@
-# Report
+> Note
+> 
+> This README is a translated version of the original README in russian, available [here](./README-russian-original.md).
 
-## 0. Дизайн эксперимента.
+
+## 0. Experiment Design
 
 [`src/create_annotation.py`](src/create_annotation.py)
 
 [`src/create_design.py`](src/create_design.py)
 
-У меня есть ~1400 картин в 8 стилях. В названиях файлов некоторых стилей сохранились имена авторов (авторов нет у фотографий и мультиков). Я решил разбить датасет на части таким образом:
-- 5% отложенный валидационный датасет
-- оставшиеся 95% = 4 фолда для CV
+I have around 1400 images in 8 styles. Some style names include author names (there are no authors for photos and cartoons). I decided to split the dataset into parts as follows:
+- 5% for validation set
+- Remaining 95% = 4 folds for cross-validation (CV)
 
-Я сделал так, что все (4 + 1) = 5 фолдов не имеют общих авторов. Это для того, чтобы снизить переобучение / data leak. Стиль одного автора может быть запоминающимся, а поэтому классификатор, тренирующийся на картинах этого автора, вероятно, сможет отгадать другие его картины в тестовой выборке. Разбивая по авторам, я старался делать так, чтобы во все фолды попало примерно одинаковое число авторов и одновременно с этим примерно одинаковое число картин.
+I ensured that all (4 + 1) = 5 folds do not share common authors. This is to reduce overfitting/data leakage. The style of one author may be memorable, so a classifier trained on images from this author may likely recognize other images by them in the test set. By splitting based on authors, I aimed to include approximately the same number of authors and roughly the same number of images in all folds.
 
-В отличие от 4 CV фолдов, валидационный датасет дополнительно усложнён -- я сделал в нём как можно больше авторов. Так, в него попало много авторов с всего одной картиной. Таблица с числом авторов и картин в каждом фолде:
+Unlike the 4 CV folds, the validation dataset is additionally complicated – I included as many authors in it as possible. Thus, it contains many authors with only one image each. Here's the table with the number of authors and images in each fold:
 
 ```
               author                 filename                
@@ -28,23 +31,23 @@ photo              1   1   1   1   1       33  33  33  33   7
 rococo             5   5   4   4   5       20  21  47  24   5
 ```
 
-Метрикой качества для всех задач классификации я избрал top 2 accuracy, которую взвешивал по классам. (Ещё много метрик я просто логгировал, но не опирался на них при выборе модели, см. [`src/scorers/ScorerCombo.py`](src/scorers/ScorerCombo.py)). Top 2 accuracy мне кажется более подходящей, чем обычная accuracy (top 1) или f1, потому что классы, на самом деле, не взаимоисключающие и отбрасывать модель за то, что она нашла пару правдоподобных классов вместо одного, я не хочу. Например, можно найти картину, на которой нарисованы животные яркими красками, широкими мазками. Это, наверное, частично и натурализм, и импрессионизм. Более того, сами стили в истории не возникали внезапно. У каждого художника есть что-то от "соседей". Впрочем, какие-то классы действительно сильно отличаются от всех остальных -- фото, например. Top 3 accuracy я не беру, потому что 3 это уже почти половина моих 8 классов.
+I chose top 2 accuracy as the quality metric for all classification tasks, weighted by classes. (I also logged many other metrics but did not rely on them for model selection, see [`src/scorers/ScorerCombo.py`](src/scorers/ScorerCombo.py)). Top 2 accuracy seems more appropriate to me than regular accuracy (top 1) or F1 score because the classes are not mutually exclusive, and I don't want to discard a model just because it found a couple of plausible classes instead of one. For example, an image might depict animals in bright colors with broad strokes, which could be partially naturalism and impressionism. Moreover, artistic styles didn't emerge suddenly in history; each artist has influences from their "neighbors." However, some classes do significantly differ from all others, such as photos. I don't consider top 3 accuracy because 3 is nearly half of my 8 classes.
 
-## 1. Классификация картин по стилям с помощью нейросети.
+## 1. Image Classification by Style Using Neural Network.
 
-### Архитектура
+### Architecture
 
 ![model-design](images/model-design.svg)
 
 [`src/models/models.py`](src/models/models.py)
 
-Я собрал нейросеть, как на картинке выше.
-1. Предобученный ResNet генерирует признаки и отдаёт 1000-мерный вектор через ReLU в полносвязный слой. То, что вышло из этого слоя, я называю embedding, а всю конструкцию, которая его создаёт -- Embedder.
-2. Embedding отправляется ещё через одну ReLU в последний полносвязный слой, который на выходе даёт logits для 8 классов.
+I've constructed a neural network as depicted in the image above.
+1. A pretrained ResNet generates features, passing a 1000-dimensional vector through ReLU into a fully connected layer. The output of this layer is termed an "embedding," and the entire construct that creates it is called an Embedder.
+2. The embedding then passes through another ReLU into the final fully connected layer, which outputs logits for 8 classes.
 
-Я взял CrossEntropyLoss, как функцию ошибок для своей задачи.
+I've used CrossEntropyLoss as the error function for my task.
 
-Картинки в трейне подвергались таким трансформациям:
+The images in the training set underwent the following transformations:
 ```python
 transform_resnet = resnet_weights.DEFAULT.transforms()
 transform_train = transforms.Compose(
@@ -60,21 +63,21 @@ transform_train = transforms.Compose(
 )
 ```
 
-В тесте использовался только `transform_resnet`.
+Only `transform_resnet` was used in the testing phase.
 
-### Оптимизация гимерпараметров
+### Hyperparameter Optimization
+
 [`src/optunize_nn_classifier.py`](src/optunize_nn_classifier.py)
 
-Гиперпараметры, которые я перебирал при обучении зафиксированы в [params.yaml](params.yaml), раздел `optunize_nn_classifier`. Главные из них:
-- Глубина ResNet. В моих экспериментах CV, качество было тем выше, чем глубже ResNet. Но выигрыш был незначительным, например, median top 2 accuracy по 4 фолдам: `0.76` и `0.81` для ResNet18 и ResNet50, соответственно. Расчеты с очень глубокими моделями сильно растягиваются по времени (я считал всё на apple m1 pro), поэтому для всех дальнейших экспериментов я пользовался ResNet18.
-- Так же из CV я обнаружил, что стоит разморозить весь ResNet и обучать его вместе новыми с добавленными слоями.
-- Learning rate. Так как параметры ResNet изначально близки к оптимальным, то темп обучения я делал изначально маленький плюс экспоненциально уменьшал его к концу расчета до `1e-5`.
-- Embedding size. Тут проклятие размерности нам на руку, потому что разнести классы в многомерном пространстве значительно легче, чем в маломерном. Впрочем, в многомерных пространствах и переобучиться значительно легче.
+The hyperparameters I tuned during training are fixed in [params.yaml](params.yaml), under the section `optunize_nn_classifier`. The main ones include:
+- ResNet depth. In my CV experiments, the quality tended to increase with deeper ResNets. However, the improvement was marginal. For example, the median top 2 accuracy over 4 folds was `0.76` and `0.81` for ResNet18 and ResNet50, respectively. Training with very deep models is time-consuming (I ran everything on an Apple M1 Pro), so for all further experiments, I stuck with ResNet18.
+- I also found from CV that it's beneficial to unfreeze the entire ResNet and train it along with the added layers.
+- Learning rate. Since the ResNet parameters are initially close to optimal, I started with a small learning rate and exponentially decreased it to `1e-5` by the end of training.
+- Embedding size. The curse of dimensionality here plays into our hands because it's easier to spread out classes in a higher-dimensional space. However, it's also easier to overfit in high-dimensional spaces.
 
-Ещё я подготовил для кручения label_smoothing и weight_decay, но так и не трогал их, хотя они могли бы улучшить генерализацию модели. Так же, стоило сделать два оптимизатора, которые работают одновременно. Один оптимизирует CNN (feature generator), другой -- линейные слои. Первый должен мелко шагать, а второй крупно.
+Additionally, I prepared label smoothing and weight decay for tuning, but I didn't touch them, although they could have improved model generalization. Also, it would have been beneficial to implement two optimizers working simultaneously – one optimizing the CNN (feature generator) and the other optimizing the linear layers. The former should take small steps while the latter takes larger ones.
 
-По итогам кроссвалидации я выбрал такие параметры:
-
+Based on the results of cross-validation, I chose the following parameters:
 ```yaml
 mlflow_run_id: ca8ff65afb5744a2bde060f116d70a22
 resnet_name: resnet18
@@ -82,15 +85,15 @@ embedding_size: 16
 lr_start: 0.0001
 ```
 
-На этих параметрах я обучил финальную модель, выбрав такое разбиение на train и test (из 4 уже приготовленных фолдов), которое давало лучшее качество.
-Этот момент спорный, потому что может быть тест получился в таком случае простой.
+Using these parameters, I trained the final model, selecting a split between train and test (from the 4 already prepared folds) that yielded the best performance. This point is debatable because the test set may have turned out to be too easy in this case.
 
-### Результаты обучения лучшей модели
+### Results of Training the Best Model
 
 ![learning-curves](images/learning-curves-ca8ff65afb5744a2bde060f116d70a22.png)
 
-Confusion matrix, test dataset. Нормализована по строкам (на главной диагонали получается recall).
+Confusion matrix, test dataset. Normalized by rows (recall on the main diagonal).
 ![confmat](images/confmat-ca8ff65afb5744a2bde060f116d70a22.png)
+
 
 Classification report, test dataset.
 ```
@@ -111,17 +114,18 @@ impressionism       0.83      0.70      0.76        61
 ```
 
 #### artdeco
-У artdeco проблемы с precision. Если для "продуктовой" модели это будет критично, то нужно обучить отдельную модель, бинарный классификатор artdeco vs all. Для этой задачи стоит пересобрать выборку (проредить остальные классы), так как artdeco на порядок менее представлен. Можно выбрать более подходящую функцию ошибок, например, FocalLoss.
+There are issues with precision for artdeco. If this is critical for the production model, it's necessary to train a separate model, a binary classifier for artdeco vs all. For this task, it's worth rebuilding the dataset (thinning out the other classes) since artdeco is much less represented. A more suitable error function can be chosen, for example, FocalLoss.
 
 #### naturalism
-Лучше artdeco, но всё равно плохо. Naturalism достаточно представлен в датасете. Проблема с ним в другом. Этот класс скорее не класс, а "атрибут" или "label" (multi-label task).
+Better than artdeco, but still poor. Naturalism is adequately represented in the dataset. The problem with it lies elsewhere. This class is more of an "attribute" or "label" (multi-label task) rather than a distinct class.
 
 #### photo
-Это чемпион: f1_score = 0.9. Здесь всё понятно, класс photo не является живописным.
+This is the champion: f1_score = 0.9. Everything is clear here; the photo class is not a painting style.
 
-### Валидация
-В самом конце, я достаю val датасет и проверяю финальное качество -- top 2 accuracy = 0.8.
-За бейзлайн можно взять случайное угадывание -- оно даёт 0.25.
+### Validation
+At the very end, I extract the validation dataset and evaluate the final quality – top 2 accuracy = 0.8.
+For the baseline, random guessing can be considered, which yields 0.25.
+
 ```
        precision  recall  fscore  top_1_accuracy  top_2_accuracy
 name                                                            
@@ -130,12 +134,12 @@ test        0.79    0.77    0.77            0.76            0.91
 val         0.63    0.62    0.61            0.63         -> 0.80
 ```
 
-### Примеры
+### Examples
 
-Следующие сетки картин нужно читать так.
-Столбец -- истинный класс.
-Колонки -- случайно подобранные примеры.
-В белом прямоугольнике -- top-3 предсказанных класса и их вероятности в процентах.
+The following grids of images should be read as follows:
+Columns represent the true class.
+Rows show randomly selected examples.
+In the white rectangle are the top-3 predicted classes and their probabilities in percentages.
 
 #### Top-1
 
@@ -145,118 +149,110 @@ val         0.63    0.62    0.61            0.63         -> 0.80
 
 ![examples-top-2](images/prediction-examples-top-2-ca8ff65afb5744a2bde060f116d70a22.png)
 
-Объясню часть примеров, потому что top 2 accuracy это как раз моя целевая метрика.
-Индексация такая: (стиль, номер строки).
+I'll explain some examples since top 2 accuracy is precisely my target metric.
+The indexing is as follows: (style, row number).
 
 (naturalism, 3), top 1 -- rococo.
-Это правдоподобно, потому что нарисован человек в "земляных" тонах.
+This is plausible because it depicts a person in "earthy" tones.
 
 (impressionism, 2), top 1 -- naturalism.
-Нарисована природа.
+Depicts nature.
 
 (impressionism, 3), top 1 -- cubism.
-Яркий пример близких стилей.
+A clear example of similar styles.
 
-(photo, 1) и (photo, 2), top 1 -- naturalism.
-Собаки на природе.
+(photo, 1) and (photo, 2), top 1 -- naturalism.
+Dogs in nature.
 
-(photo, 3), артдеко собака.
-Скорее всего, сыграл пересвет и бледная цветовая палитра.
+(photo, 3), art deco dog.
+Likely due to overexposure and a pale color palette.
 
-(rococo, 2), top 1 -- artdeco.
-Чб цветовая палитра, не свойственная для живописного rococo.
+(rococo, 2), top 1 -- art deco.
+Black and white color palette, not characteristic of rococo paintings.
 
 (cartoon, 2), top 1 -- japonism.
-Можно сказать, что нейросеть права, потому что это темные контуры с плавной градиентной заливкой.
+One could argue that the neural network is correct here because of the dark outlines and smooth gradient fill.
 
 (cartoon, 3), top 1 -- japonism.
-Нет объяснений, ошибка. Стоить XAI применить.
+No explanations, an error. XAI should be applied.
 
-И так далее...
-
+And so on...
 
 #### Occlusion maps for top-2
 
-Я хотел воспользоваться [Captum](https://captum.ai/tutorials/Resnet_TorchVision_Interpret), но он у меня не заработал.
-Поэтому я написал самый простой метод сам -- occlusion.
-В подписи я оставил только top-1 и top-2 их вероятностями.
-Последняя строка -- occlusion amplitude -- показывает, насколько меняется вероятность истинного класса (модуль), если закрывать некоторые части изображения.
-Цвета значат следующее.
-Синий -- если удалить квадрат (занулить кусок изображения), то вероятность истинного класса уменьшится.
-Красный -- наоборот, этот квадрат "мешает" определению истинного класса.
+I wanted to use [Captum](https://captum.ai/tutorials/Resnet_TorchVision_Interpret), but it didn't work for me.
+So I implemented the simplest method myself – occlusion.
+In the caption, I left only the top-1 and top-2 classes with their probabilities.
+The last row – occlusion amplitude – shows how much the probability of the true class changes (absolute value) when certain parts of the image are occluded.
+Colors signify the following:
+Blue – if the square is removed (part of the image is zeroed out), the probability of the true class decreases.
+Red – on the contrary, this square "hinders" the determination of the true class.
 
 ![occlusion-top-2](images/occlusion-top-2-ca8ff65afb5744a2bde060f116d70a22.png)
 
-(japonism, 1) -- предсказалось rococo.
-Во-первых, мне самому кажется, что это не japonism.
-Во-вторых, я согласен, что в красных квадратах находятся rococo-like лица.
+(japonism, 1) – predicted as rococo.
+Firstly, I personally don't think it's japonism.
+Secondly, I agree that the red squares contain rococo-like faces.
 
-(photo, 1) и (photo, 2) -- предсказался натурализм.
-Чтобы повысить вероятность истинного класса photo, нужно убрать собак.
+(photo, 1) and (photo, 2) – predicted as naturalism.
+To increase the probability of the true class photo, you need to remove the dogs.
 
-(photo, 3) -- предсказался artdeco.
-Тут, как будто, ничего нельзя сделать.
-Это настоящая пересвеченная artdeco-собака.
+(photo, 3) – predicted as art deco.
+Here, it seems like nothing can be done.
+This is a real overexposed art deco dog.
 
-С интерпретацией остальных примеров пока затрудняюсь.
+I'm currently unable to provide interpretations for the rest of the examples.
 
-#### Картины с предсказанными классами не в top-2
+#### Paintings with Predicted Classes Not in Top-2
 
 ![examples-wrong](images/prediction-examples-wrong-ca8ff65afb5744a2bde060f116d70a22.png)
 
-Интересно, что третий класс на всех этих картинках и есть загаданный.
+Interestingly, the third class in all these images is indeed the predicted one.
 
-## 2. Кластеризация эмбеддингов (выходы предпоследнего слоя).
+## 2. Clustering of Embeddings (Outputs of the Penultimate Layer)
 
-На картинке показана "эволюция" эмбеддингов.
-На 9 эпохе модель достигла лучшего качества. 
-Эмбеддинг 16-мерный, для визуализации в 2D я использовал UMap.
+The image shows the "evolution" of embeddings.
+The model achieved its best performance at epoch 9.
+The embeddings are 16-dimensional, but for visualization in 2D, I used UMap.
 
 ![embedding-evolution](images/embedding-evolution-ca8ff65afb5744a2bde060f116d70a22.png)
 
-Кластеризация с помощью и kNN, и AgglomerativeClustering дала максимальный silhouette score при числе кластеров равном числу классов (8). Следующая картинка получена на данных с лучшей эпохи:
+Clustering using both kNN and AgglomerativeClustering resulted in the maximum silhouette score when the number of clusters was equal to the number of classes (8). The next image is obtained from the data of the best epoch:
 
 ![embedding-best-epoch](images/embedding-clustering-ca8ff65afb5744a2bde060f116d70a22.png)
 
-Japonism, cartoon и photo сидят в своих отдалённых кластерах (artdeco едва соединяется с cubism).
-С cartoon и photo понятно -- это не картины.
-Japonism отделился, вероятно, потому что не является европейским живописным стилем.
-Остальные классы расположены интереснее.
-Я вижу путь от rococo через naturalism, impressionism и cubism к artdeco.
-Про naturalism я не уверен (он, кстати, на impressionism наполз), но остальные классы располагаются в хронологическом порядке (если сверяться с Википедией).
+Japonism, cartoon, and photo are in their own distant clusters (art deco barely connects with cubism).
+It's understandable for cartoon and photo – they're not paintings.
+Japonism is separated, probably because it's not a European painting style.
+The other classes are arranged more interestingly.
+I see a path from rococo through naturalism, impressionism, and cubism to art deco.
+I'm not sure about naturalism (it slightly overlaps with impressionism), but the rest of the classes are arranged in chronological order (if compared with Wikipedia).
 
-*Заметка. Также, в ходе экспериментов я заметил, что при увеличении learning rate на порядок такой красивой кластеризации не получается, хотя задача классификации решается примерно так же хорошо.*
+*Note: During experiments, I also noticed that increasing the learning rate by an order of magnitude prevents such beautiful clustering, although the classification task is solved similarly well.*
 
-## 3. Metric learning
+## 3. Metric Learning
 
 [`src/train_embedder.py`](src/train_embedder.py)
 
-Metric learning хорошо подходит для open-set задач.
-В моём случае, финальная цель -- классифицировать уже сформированные, зафиксированные классы (closed-set).
-Впрочем, можно попробовать построить эмбединги с помощью metric learning на всех, кроме, скажем, пары классов.
-После обучения заэмбеддить отложенные классы и оценить результат.
-Отложил я классы photo и naturalism.
+Metric learning is well-suited for open-set tasks. In my case, the final goal is to classify already established, fixed classes (closed-set). However, it's possible to try building embeddings using metric learning on all classes except, let's say, a pair of classes. After training, embed the withheld classes and evaluate the result. I withheld the classes photo and naturalism.
 
-Мой опыт подсказывает, что функции ошибки, работающие с углами через CosineSimilarity, проявляют себя лучше всего при построении эмбедингов.
-Я взял ArcFaceLoss, но даже на нём задача решалась плохо.
-В качестве метрики я использовал (как в предыдущем пункте про кластеризацию) silhouette score.
-Так я сделал, потому что это просто и быстро реализовать.
+From my experience, loss functions that work with angles through CosineSimilarity perform best when building embeddings. I chose ArcFaceLoss, but even with that, the task was solved poorly. As a metric, I used silhouette score (as in the previous section on clustering) because it's simple and quick to implement.
 
-Так как ArcFaceLoss работает с эмбеддингами на гиперсфере, я решил сделать эмбеддер в 3D, чтобы рисовать занимательные картинки. В многомерном пространстве я тоже строил эмбеддинги, но качество от этого не менялось.
+Since ArcFaceLoss works with embeddings on the hypersphere, I decided to make the embedder in 3D to create interesting visuals. I also experimented with embeddings in higher-dimensional space, but the quality didn't change.
 
-Нативное пространство: [click](images/arccos-native-60721c74bc834d52a53f486ff813d08c.html).
+Native space: [click](images/arccos-native-60721c74bc834d52a53f486ff813d08c.html).
 
-Нормализованные векторы эмбеддингов (лежат на единичной сфере): [click](images/arccos-sphere-60721c74bc834d52a53f486ff813d08c.html).
+Normalized embedding vectors (lying on the unit sphere): [click](images/arccos-sphere-60721c74bc834d52a53f486ff813d08c.html).
 
-Отложенные классы размазались по всей поверхности сферы, хотя если их убрать, то видно, что модель хорошо научилась разносить оставшиеся классы из обучающей выборки.
+The withheld classes are spread across the entire surface of the sphere, although if they are removed, it can be seen that the model has learned well to spread out the remaining classes from the training set.
 
-*Также я сделал следующий эксперимент. Для первой задачи классификации я применил два лосса одновременно: TripletMarginLoss для эмбеддингов и CrossEntropy для logits. Это привело к ухудшению качества классификации. Результаты не показываю.*
+*Additionally, I conducted the following experiment. For the first classification task, I applied two loss functions simultaneously: TripletMarginLoss for embeddings and CrossEntropy for logits. This led to a deterioration in classification quality. I'm not showing the results.*
 
-## 4. Обучение Random Forest на эмбеддингах.
+## 4. Training Random Forest on Embeddings
 
 [`src/optunize_random_forest.py`](src/optunize_random_forest.py)
 
-Полученный эмбеддинг я использовал, как признаки для обучения Random Forest (его я выбрал для простоты). Учил на такой же разбивке трейн/тест, как в пункте 1. Привлёк optuna для оптимизации гиперпараметров. Качество получается хуже, чем у нейросети.
+I used the obtained embedding as features for training Random Forest (I chose it for simplicity). I trained it on the same train/test split as in section 1. I utilized Optuna for hyperparameter optimization. The quality obtained is worse than that of the neural network.
 
 ```
         top_2_accuracy
@@ -268,25 +264,25 @@ test    0.91    0.86
 val     0.80    0.77
 ```
 
-Это разумно, несмотря на то, что в нейросети остаётся только один линейный слой, который делает из эмбеддинга финальные logits. Разумно потому, что весь хвост из предыдущих слоёв учился сначала на ImageNet, потом на моём датасете, чтобы последний слой мог успешно вычислить logits. 
+This is reasonable, despite the fact that in the neural network, there remains only one linear layer that converts the embedding into final logits. It's reasonable because the entire tail from the previous layers was first trained on ImageNet, then on my dataset, so that the final layer could successfully compute logits.
 
-Random Forest (и подобные ему) алгоритмы будут выигрывать в решении этой задачи в другом сценарии. Например, весь ResNet заморожен вместе со своим выходным полносвязным слоем, а учатся только два линейных слоя в конце. В данном случае, Random Forest может дорасти до состояния, в котором он обгонит в качестве нейросеть.
+Random Forest (and similar) algorithms may excel in solving this problem in a different scenario. For example, if the entire ResNet is frozen along with its output fully connected layer, and only the last two linear layers are trained. In this case, Random Forest may grow to a state where it outperforms the neural network in terms of quality.
 
-Остаётся вопрос, если у нас получилось 2 алгоритма:
-1. Нейросеть = Эмбеддер + Голова
-2. Гибрид = Эмбеддер + Random Forest
+The question remains, if we have two algorithms:
+1. Neural network = Embedder + Head
+2. Hybrid = Embedder + Random Forest
 
-Какую комбинацию брать?
+Which combination to choose?
 
-Ответ зависит от цели (в конце концов, Random Forest может дать качество чуть лучше), но я бы использовал нейросеть.
+The answer depends on the goal (after all, Random Forest may provide slightly better quality), but I would use the neural network.
 
-Во-первых, её предсказания лучше откалиброваны в смысле вероятности, особенно, если лучшая модель выбиралась не по метрике, а по лоссу. Если нас заинтересуют предсказанные вероятности классов, то Random Forest нужно будет дополнительно калибровать.
+Firstly, its predictions are better calibrated in terms of probability, especially if the best model was chosen not based on a metric, but on loss. If we are interested in predicted class probabilities, then Random Forest will need to be additionally calibrated.
 
 https://dl.acm.org/doi/abs/10.1145/1102351.1102430
 
 https://arxiv.org/pdf/1706.04599.pdf
- 
-Во-вторых, одна нейросеть выглядит элегантнее. (Особенно, если к Random Forest придётся добавить калибровщика).
+
+Secondly, a single neural network looks more elegant. (Especially if a calibrator needs to be added to Random Forest).
 
 
 # Resources
