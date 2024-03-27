@@ -2,6 +2,8 @@
 > 
 > This README is a translated version of the original README in russian, available [here](./README-russian-original.md).
 
+# Project Description
+The goal of this project is to develop a model capable of differentiating paintings based on their artistic style. The project explores various approaches to achieve this goal, including the implementation of neural network models and hybrid architectures combining neural networks with random forest classifiers. Additionally, the project aims to leverage metric learning techniques to enhance the model's performance and incorporates Explainable AI (Artificial Intelligence) techniques to provide insights into the model's decision-making process.
 
 ## 0. Experiment Design
 
